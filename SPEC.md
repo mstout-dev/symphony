@@ -2181,9 +2181,13 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 
 ### 17.7 CLI and Host Lifecycle
 
-- CLI accepts a positional workflow path argument (`path-to-WORKFLOW.md`)
+- CLI accepts one or more positional workflow path arguments (`path-to-WORKFLOW.md ...`)
 - CLI uses `./WORKFLOW.md` when no workflow path argument is provided
 - CLI errors on nonexistent explicit workflow path or missing default `./WORKFLOW.md`
+- When multiple paths are provided, the implementation runs an isolated workflow runtime for each
+  path; each runtime retains one authoritative orchestrator for its own tracker scope
+- Multi-workflow mode requires a shared logs root with separate child log directories and uses each
+  workflow's configured dashboard port rather than one CLI port override
 - CLI surfaces startup failure cleanly
 - CLI exits with success when application starts and shuts down normally
 - CLI exits nonzero when startup fails or the host process exits abnormally

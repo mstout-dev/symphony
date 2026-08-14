@@ -136,4 +136,142 @@ defmodule SymphonyElixir.CLITest do
 
     assert :ok = CLI.evaluate([@ack_flag, "WORKFLOW.md"], deps)
   end
+
+  test "runs multiple workflow paths as one managed group" do
+    parent = self()
+    paths = ["tmp/life-os/WORKFLOW.md", "tmp/next-forge/WORKFLOW.md"]
+    expanded_paths = Enum.map(paths, &Path.expand/1)
+    logs_root = Path.expand("tmp/symphony-logs")
+
+    deps =
+      group_deps(fn workflow_paths, group_logs_root ->
+        send(parent, {:group_started, workflow_paths, group_logs_root})
+        :ok
+      end)
+
+    assert :ok = CLI.evaluate([@ack_flag, "--logs-root", "tmp/symphony-logs" | paths], deps)
+    assert_received {:group_started, ^expanded_paths, ^logs_root}
+  end
+
+  test "rejects missing and duplicate workflow paths before starting a group" do
+    parent = self()
+
+    deps =
+      group_deps(
+        fn _workflow_paths, _logs_root ->
+          send(parent, :group_started)
+          :ok
+        end,
+        file_regular?: fn path -> !String.ends_with?(path, "missing/WORKFLOW.md") end
+      )
+
+    assert {:error, missing_message} =
+             CLI.evaluate(
+               [@ack_flag, "--logs-root", "tmp/logs", "tmp/valid/WORKFLOW.md", "tmp/missing/WORKFLOW.md"],
+               deps
+             )
+
+    assert missing_message =~ "Workflow file not found:"
+
+    assert {:error, duplicate_message} =
+             CLI.evaluate(
+               [@ack_flag, "--logs-root", "tmp/logs", "tmp/valid/WORKFLOW.md", "tmp/valid/WORKFLOW.md"],
+               deps
+             )
+
+    assert duplicate_message =~ "Workflow paths must be unique"
+    refute_received :group_started
+  end
+
+  test "requires a logs root and rejects a shared port for workflow groups" do
+    deps = group_deps(fn _workflow_paths, _logs_root -> :ok end)
+    paths = ["tmp/life-os/WORKFLOW.md", "tmp/next-forge/WORKFLOW.md"]
+
+    assert {:error, logs_message} = CLI.evaluate([@ack_flag | paths], deps)
+    assert logs_message =~ "--logs-root is required"
+
+    assert {:error, port_message} =
+             CLI.evaluate([@ack_flag, "--logs-root", "tmp/logs", "--port", "4001" | paths], deps)
+
+    assert port_message =~ "--port cannot be shared"
+  end
+
+  test "builds isolated child commands and stops siblings when one child exits" do
+    parent = self()
+    first_workflow_path = Path.expand("tmp/life-os/WORKFLOW.md")
+    second_workflow_path = Path.expand("tmp/next-forge/WORKFLOW.md")
+    workflow_paths = [first_workflow_path, second_workflow_path]
+    logs_root = Path.expand("tmp/symphony-logs")
+
+    runtime_deps = %{
+      executable_path: fn -> {:ok, "/tmp/symphony"} end,
+      open_port: fn executable, args, env ->
+        port = make_ref()
+        send(parent, {:child_opened, port, executable, args, env})
+        {:ok, port}
+      end,
+      close_port: fn port -> send(parent, {:child_closed, port}) end,
+      install_shutdown_handlers: fn _shutdown -> fn -> :ok end end,
+      write_stderr: fn output -> send(parent, {:stderr, IO.iodata_to_binary(output)}) end
+    }
+
+    task = Task.async(fn -> CLI.supervise_workflows(workflow_paths, logs_root, runtime_deps) end)
+
+    assert_receive {:child_opened, first_port, "/tmp/symphony", first_args, first_env}
+    assert_receive {:child_opened, second_port, "/tmp/symphony", second_args, second_env}
+
+    assert [@ack_flag, "--logs-root", first_logs_root, ^first_workflow_path] = first_args
+    assert [@ack_flag, "--logs-root", second_logs_root, ^second_workflow_path] = second_args
+    refute first_logs_root == second_logs_root
+    assert first_env == [{~c"SYMPHONY_MANAGED_CHILD", ~c"1"}]
+    assert second_env == first_env
+
+    send(task.pid, {first_port, {:exit_status, 17}})
+
+    assert {:error, message} = Task.await(task)
+    assert message =~ first_workflow_path
+    assert message =~ "status 17"
+    assert_received {:child_closed, ^second_port}
+    refute_received {:child_closed, ^first_port}
+  end
+
+  test "reports child startup failures and closes children already started" do
+    parent = self()
+    workflow_paths = [Path.expand("tmp/life-os/WORKFLOW.md"), Path.expand("tmp/next-forge/WORKFLOW.md")]
+
+    runtime_deps = %{
+      executable_path: fn -> {:ok, "/tmp/symphony"} end,
+      open_port: fn _executable, args, _env ->
+        if List.last(args) == List.first(workflow_paths) do
+          port = make_ref()
+          send(parent, {:first_child, port})
+          {:ok, port}
+        else
+          {:error, :boom}
+        end
+      end,
+      close_port: fn port -> send(parent, {:child_closed, port}) end,
+      install_shutdown_handlers: fn _shutdown -> fn -> :ok end end,
+      write_stderr: fn _output -> :ok end
+    }
+
+    assert {:error, message} = CLI.supervise_workflows(workflow_paths, Path.expand("tmp/logs"), runtime_deps)
+    assert message =~ "Failed to start Symphony"
+    assert_receive {:first_child, first_port}
+    assert_received {:child_closed, ^first_port}
+  end
+
+  defp group_deps(run_workflow_group, overrides \\ []) do
+    Map.merge(
+      %{
+        file_regular?: fn _path -> true end,
+        set_workflow_file_path: fn _path -> :ok end,
+        set_logs_root: fn _path -> :ok end,
+        set_server_port_override: fn _port -> :ok end,
+        ensure_all_started: fn -> {:ok, [:symphony_elixir]} end,
+        run_workflow_group: run_workflow_group
+      },
+      Map.new(overrides)
+    )
+  end
 end

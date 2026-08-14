@@ -99,7 +99,7 @@ chmod +x ./symphony-v0.0.1-macos_arm64
 
 ## Configuration
 
-Pass a custom workflow file path to `./bin/symphony` when starting the service:
+Pass one or more custom workflow file paths to `./bin/symphony` when starting the service:
 
 ```bash
 ./bin/symphony /path/to/custom/WORKFLOW.md
@@ -107,10 +107,27 @@ Pass a custom workflow file path to `./bin/symphony` when starting the service:
 
 If no path is passed, Symphony defaults to `./WORKFLOW.md`.
 
+To operate several repository-owned workflows as one service, pass every path in the same command:
+
+```bash
+./bin/symphony \
+  --logs-root /var/log/symphony \
+  /path/to/product-a/WORKFLOW.md \
+  /path/to/product-b/WORKFLOW.md
+```
+
+The parent process starts one isolated Symphony runtime per workflow. Each runtime keeps its own
+tracker scope, workspace root, concurrency, prompt, and optional `server.port`. If one runtime
+exits, the parent stops the others and exits nonzero so the service manager can restart the group.
+
 Optional flags:
 
 - `--logs-root` tells Symphony to write logs under a different directory (default: `./log`)
-- `--port` also starts the Phoenix observability service (default: disabled)
+- `--port` also starts the Phoenix observability service for a single workflow (default: disabled)
+
+Multiple workflows require `--logs-root`; Symphony creates a stable path-derived subdirectory for
+each workflow. Configure dashboard ports in the individual `WORKFLOW.md` files because a shared
+CLI `--port` is rejected in this mode.
 
 The `WORKFLOW.md` file uses YAML front matter for configuration, plus a Markdown body used as the
 Codex session prompt.

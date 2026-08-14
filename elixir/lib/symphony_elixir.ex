@@ -40,7 +40,7 @@ defmodule SymphonyElixir.Application do
       SymphonyElixir.WorkflowStore,
       SymphonyElixir.AgentRuntimeSupervisor,
       SymphonyElixir.HttpServer,
-      SymphonyElixir.StatusDashboard
+      status_dashboard_child()
     ]
 
     Supervisor.start_link(
@@ -66,6 +66,14 @@ defmodule SymphonyElixir.Application do
   end
 
   defp burrito_runtime?, do: System.get_env("__BURRITO") == "1"
+
+  defp status_dashboard_child do
+    if System.get_env("SYMPHONY_MANAGED_CHILD") == "1" do
+      {SymphonyElixir.StatusDashboard, enabled: false}
+    else
+      SymphonyElixir.StatusDashboard
+    end
+  end
 
   defp plain_arguments, do: Enum.map(:init.get_plain_arguments(), &to_string/1)
 end
