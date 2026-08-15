@@ -897,6 +897,9 @@ Failure handling:
 - Workspace population/synchronization failures return an error for the current attempt.
 - If failure happens while creating a brand-new workspace, implementations MAY remove the partially
   prepared directory.
+- A partially prepared brand-new workspace MUST NOT be reused as a successfully prepared workspace
+  on retry. Implementations MAY first move it to a unique quarantine path under the workspace root
+  so cleanup can proceed without keeping the deterministic per-issue path occupied.
 - Reused workspaces SHOULD NOT be destructively reset on population failure unless that policy is
   explicitly chosen and documented.
 

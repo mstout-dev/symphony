@@ -332,6 +332,48 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
+  test "workspace retries bootstrap when the failed workspace cannot be deleted in place" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-hook-cleanup-retry-#{System.unique_integer([:positive])}"
+      )
+
+    workspace_root = Path.join(test_root, "workspaces")
+    attempt_log = Path.join(test_root, "after-create-attempts")
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        hook_after_create: """
+        if [ -f "#{attempt_log}" ]; then count=$(wc -l < "#{attempt_log}"); else count=0; fi
+        printf 'attempt\\n' >> "#{attempt_log}"
+        if [ "$count" -eq 0 ]; then
+          mkdir locked
+          printf partial > locked/file
+          chmod 000 locked
+          exit 17
+        fi
+        printf ready > READY
+        """
+      )
+
+      assert {:error, {:workspace_hook_failed, "after_create", 17, _output}} =
+               Workspace.create_for_issue("MT-FAIL-CLEANUP-RETRY")
+
+      assert {:ok, workspace} = Workspace.create_for_issue("MT-FAIL-CLEANUP-RETRY")
+      assert File.read!(Path.join(workspace, "READY")) == "ready"
+      assert String.split(String.trim(File.read!(attempt_log)), "\n") == ["attempt", "attempt"]
+    after
+      test_root
+      |> Path.join("**/locked")
+      |> Path.wildcard(match_dot: true)
+      |> Enum.each(&File.chmod(&1, 0o700))
+
+      File.rm_rf!(test_root)
+    end
+  end
+
   test "workspace surfaces after_create hook timeouts" do
     workspace_root =
       Path.join(
