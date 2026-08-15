@@ -307,17 +307,29 @@ defmodule SymphonyElixir.Workspace do
   defp cleanup_failed_new_workspace(_workspace, false, _worker_host), do: :ok
 
   defp cleanup_failed_new_workspace(workspace, true, nil) do
-    case File.rm_rf(workspace) do
-      {:ok, _removed} ->
+    quarantine = failed_workspace_quarantine_path(workspace)
+
+    case File.rename(workspace, quarantine) do
+      :ok ->
+        remove_quarantined_workspace(workspace, quarantine)
+
+      {:error, :enoent} ->
         :ok
 
-      {:error, reason, path} ->
-        Logger.warning("Failed to remove partial workspace path=#{path} reason=#{inspect(reason)}")
+      {:error, reason} ->
+        Logger.warning("Failed to quarantine partial workspace workspace=#{workspace} quarantine=#{quarantine} reason=#{inspect(reason)}")
     end
   end
 
   defp cleanup_failed_new_workspace(workspace, true, worker_host) when is_binary(worker_host) do
-    script = [remote_shell_assign("workspace", workspace), "rm -rf \"$workspace\""] |> Enum.join("\n")
+    script =
+      [
+        remote_shell_assign("workspace", workspace),
+        "quarantine=\"${workspace}.symphony-failed-$(date +%s)-$$\"",
+        "if [ -e \"$workspace\" ]; then mv \"$workspace\" \"$quarantine\"; fi",
+        "rm -rf \"$quarantine\""
+      ]
+      |> Enum.join("\n")
 
     case run_remote_command(worker_host, script, Config.settings!().hooks.timeout_ms) do
       {:ok, {_output, 0}} ->
@@ -325,6 +337,21 @@ defmodule SymphonyElixir.Workspace do
 
       result ->
         Logger.warning("Failed to remove partial workspace worker_host=#{worker_host_for_log(worker_host)} result=#{inspect(result)}")
+    end
+  end
+
+  defp failed_workspace_quarantine_path(workspace) do
+    suffix = :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
+    Path.join(Path.dirname(workspace), ".#{Path.basename(workspace)}.symphony-failed-#{suffix}")
+  end
+
+  defp remove_quarantined_workspace(workspace, quarantine) do
+    case File.rm_rf(quarantine) do
+      {:ok, _removed} ->
+        :ok
+
+      {:error, reason, path} ->
+        Logger.warning("Failed to remove quarantined workspace workspace=#{workspace} quarantine=#{quarantine} path=#{path} reason=#{inspect(reason)}")
     end
   end
 
