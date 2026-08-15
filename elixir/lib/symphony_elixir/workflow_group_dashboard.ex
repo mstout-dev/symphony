@@ -13,6 +13,13 @@ defmodule SymphonyElixir.WorkflowGroupDashboard do
 
   @spec start_supervisor(non_neg_integer()) :: Supervisor.on_start()
   def start_supervisor(port) when is_integer(port) and port >= 0 do
+    with {:ok, _started} <- Application.ensure_all_started(:phoenix_live_view),
+         {:ok, _started} <- Application.ensure_all_started(:bandit) do
+      start_supervisor_children(port)
+    end
+  end
+
+  defp start_supervisor_children(port) do
     # ponytail: the group needs only one state process and the existing web server.
     pubsub =
       if Process.whereis(SymphonyElixir.PubSub) do

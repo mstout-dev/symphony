@@ -665,7 +665,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert output =~ "SYMPHONY_GROUP_SNAPSHOT_V1:"
 
-    payload = %{counts: %{running: 1}}
+    payload = %{counts: %{running: 1}, running: [%{issue_identifier: "TEST-1"}]}
     encoded_payload = SymphonyElixir.GroupReporter.encode_snapshot(payload)
     assert {:ok, ^payload} = SymphonyElixir.GroupReporter.decode_snapshot(encoded_payload)
     assert :error = SymphonyElixir.GroupReporter.decode_snapshot("not a frame")
