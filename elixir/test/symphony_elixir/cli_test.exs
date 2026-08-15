@@ -1,7 +1,7 @@
 defmodule SymphonyElixir.CLITest do
   use ExUnit.Case, async: true
 
-  alias SymphonyElixir.CLI
+  alias SymphonyElixir.{CLI, GroupReporter}
 
   @ack_flag "--i-understand-that-this-will-be-running-without-the-usual-guardrails"
 
@@ -144,13 +144,15 @@ defmodule SymphonyElixir.CLITest do
     logs_root = Path.expand("tmp/symphony-logs")
 
     deps =
-      group_deps(fn workflow_paths, group_logs_root ->
-        send(parent, {:group_started, workflow_paths, group_logs_root})
+      group_deps(fn workflow_paths, group_logs_root, server_port ->
+        send(parent, {:group_started, workflow_paths, group_logs_root, server_port})
         :ok
       end)
 
-    assert :ok = CLI.evaluate([@ack_flag, "--logs-root", "tmp/symphony-logs" | paths], deps)
-    assert_received {:group_started, ^expanded_paths, ^logs_root}
+    assert :ok =
+             CLI.evaluate([@ack_flag, "--logs-root", "tmp/symphony-logs", "--port", "4001" | paths], deps)
+
+    assert_received {:group_started, ^expanded_paths, ^logs_root, 4001}
   end
 
   test "rejects missing and duplicate workflow paths before starting a group" do
@@ -158,7 +160,7 @@ defmodule SymphonyElixir.CLITest do
 
     deps =
       group_deps(
-        fn _workflow_paths, _logs_root ->
+        fn _workflow_paths, _logs_root, _server_port ->
           send(parent, :group_started)
           :ok
         end,
@@ -167,7 +169,15 @@ defmodule SymphonyElixir.CLITest do
 
     assert {:error, missing_message} =
              CLI.evaluate(
-               [@ack_flag, "--logs-root", "tmp/logs", "tmp/valid/WORKFLOW.md", "tmp/missing/WORKFLOW.md"],
+               [
+                 @ack_flag,
+                 "--logs-root",
+                 "tmp/logs",
+                 "--port",
+                 "4001",
+                 "tmp/valid/WORKFLOW.md",
+                 "tmp/missing/WORKFLOW.md"
+               ],
                deps
              )
 
@@ -175,7 +185,15 @@ defmodule SymphonyElixir.CLITest do
 
     assert {:error, duplicate_message} =
              CLI.evaluate(
-               [@ack_flag, "--logs-root", "tmp/logs", "tmp/valid/WORKFLOW.md", "tmp/valid/WORKFLOW.md"],
+               [
+                 @ack_flag,
+                 "--logs-root",
+                 "tmp/logs",
+                 "--port",
+                 "4001",
+                 "tmp/valid/WORKFLOW.md",
+                 "tmp/valid/WORKFLOW.md"
+               ],
                deps
              )
 
@@ -183,17 +201,16 @@ defmodule SymphonyElixir.CLITest do
     refute_received :group_started
   end
 
-  test "requires a logs root and rejects a shared port for workflow groups" do
-    deps = group_deps(fn _workflow_paths, _logs_root -> :ok end)
+  test "requires one logs root and one shared port for workflow groups" do
+    deps = group_deps(fn _workflow_paths, _logs_root, _server_port -> :ok end)
     paths = ["tmp/life-os/WORKFLOW.md", "tmp/next-forge/WORKFLOW.md"]
 
     assert {:error, logs_message} = CLI.evaluate([@ack_flag | paths], deps)
     assert logs_message =~ "--logs-root is required"
 
-    assert {:error, port_message} =
-             CLI.evaluate([@ack_flag, "--logs-root", "tmp/logs", "--port", "4001" | paths], deps)
+    assert {:error, port_message} = CLI.evaluate([@ack_flag, "--logs-root", "tmp/logs" | paths], deps)
 
-    assert port_message =~ "--port cannot be shared"
+    assert port_message =~ "--port is required"
   end
 
   test "builds isolated child commands and stops siblings when one child exits" do
@@ -211,12 +228,18 @@ defmodule SymphonyElixir.CLITest do
         {:ok, port}
       end,
       close_port: fn port -> send(parent, {:child_closed, port}) end,
+      start_dashboard: fn port ->
+        send(parent, {:dashboard_started, port})
+        {:ok, self()}
+      end,
+      put_snapshot: fn label, path, payload -> send(parent, {:snapshot, label, path, payload}) end,
       install_shutdown_handlers: fn _shutdown -> fn -> :ok end end,
       write_stderr: fn output -> send(parent, {:stderr, IO.iodata_to_binary(output)}) end
     }
 
-    task = Task.async(fn -> CLI.supervise_workflows(workflow_paths, logs_root, runtime_deps) end)
+    task = Task.async(fn -> CLI.supervise_workflows(workflow_paths, logs_root, 4001, runtime_deps) end)
 
+    assert_receive {:dashboard_started, 4001}
     assert_receive {:child_opened, first_port, "/tmp/symphony", first_args, first_env}
     assert_receive {:child_opened, second_port, "/tmp/symphony", second_args, second_env}
 
@@ -225,6 +248,10 @@ defmodule SymphonyElixir.CLITest do
     refute first_logs_root == second_logs_root
     assert first_env == [{~c"SYMPHONY_MANAGED_CHILD", ~c"1"}]
     assert second_env == first_env
+
+    payload = %{counts: %{running: 0}}
+    send(task.pid, {first_port, {:data, {:eol, GroupReporter.encode_snapshot(payload)}}})
+    assert_receive {:snapshot, _label, ^first_workflow_path, ^payload}
 
     send(task.pid, {first_port, {:exit_status, 17}})
 
@@ -251,11 +278,15 @@ defmodule SymphonyElixir.CLITest do
         end
       end,
       close_port: fn port -> send(parent, {:child_closed, port}) end,
+      start_dashboard: fn _port -> {:ok, self()} end,
+      put_snapshot: fn _label, _path, _payload -> :ok end,
       install_shutdown_handlers: fn _shutdown -> fn -> :ok end end,
       write_stderr: fn _output -> :ok end
     }
 
-    assert {:error, message} = CLI.supervise_workflows(workflow_paths, Path.expand("tmp/logs"), runtime_deps)
+    assert {:error, message} =
+             CLI.supervise_workflows(workflow_paths, Path.expand("tmp/logs"), 4001, runtime_deps)
+
     assert message =~ "Failed to start Symphony"
     assert_receive {:first_child, first_port}
     assert_received {:child_closed, ^first_port}

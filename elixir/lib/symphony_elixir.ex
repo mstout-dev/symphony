@@ -39,8 +39,9 @@ defmodule SymphonyElixir.Application do
       {Phoenix.PubSub, name: SymphonyElixir.PubSub},
       SymphonyElixir.WorkflowStore,
       SymphonyElixir.AgentRuntimeSupervisor,
-      SymphonyElixir.HttpServer,
-      status_dashboard_child()
+      http_server_child(),
+      status_dashboard_child(),
+      SymphonyElixir.GroupReporter
     ]
 
     Supervisor.start_link(
@@ -68,12 +69,22 @@ defmodule SymphonyElixir.Application do
   defp burrito_runtime?, do: System.get_env("__BURRITO") == "1"
 
   defp status_dashboard_child do
-    if System.get_env("SYMPHONY_MANAGED_CHILD") == "1" do
+    if managed_child?() do
       {SymphonyElixir.StatusDashboard, enabled: false}
     else
       SymphonyElixir.StatusDashboard
     end
   end
+
+  defp http_server_child do
+    if managed_child?() do
+      {SymphonyElixir.HttpServer, port: nil}
+    else
+      SymphonyElixir.HttpServer
+    end
+  end
+
+  defp managed_child?, do: System.get_env("SYMPHONY_MANAGED_CHILD") == "1"
 
   defp plain_arguments, do: Enum.map(:init.get_plain_arguments(), &to_string/1)
 end

@@ -5,6 +5,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   use Phoenix.LiveView, layout: {SymphonyElixirWeb.Layouts, :app}
 
+  alias SymphonyElixir.WorkflowGroupDashboard
   alias SymphonyElixirWeb.{Endpoint, ObservabilityPubSub, Presenter}
   @runtime_tick_ms 1_000
 
@@ -38,14 +39,35 @@ defmodule SymphonyElixirWeb.DashboardLive do
   end
 
   @impl true
+  def render(%{payload: %{projects: _projects}} = assigns) do
+    ~H"""
+    <.project_dashboard
+      :for={project <- @payload.projects}
+      payload={project.state}
+      now={@now}
+      project_name={project.name}
+    />
+    """
+  end
+
   def render(assigns) do
+    ~H"""
+    <.project_dashboard payload={@payload} now={@now} />
+    """
+  end
+
+  attr(:payload, :map, required: true)
+  attr(:now, :any, required: true)
+  attr(:project_name, :string, default: nil)
+
+  defp project_dashboard(assigns) do
     ~H"""
     <section class="dashboard-shell">
       <header class="hero-card">
         <div class="hero-grid">
           <div>
             <p class="eyebrow">
-              Symphony Observability
+              <%= @project_name || "Symphony Observability" %>
             </p>
             <h1 class="hero-title">
               Operations Dashboard
@@ -330,7 +352,10 @@ defmodule SymphonyElixirWeb.DashboardLive do
   end
 
   defp load_payload do
-    Presenter.state_payload(orchestrator(), snapshot_timeout_ms())
+    case Endpoint.config(:group_dashboard) do
+      nil -> Presenter.state_payload(orchestrator(), snapshot_timeout_ms())
+      group_dashboard -> WorkflowGroupDashboard.state_payload(group_dashboard)
+    end
   end
 
   defp orchestrator do

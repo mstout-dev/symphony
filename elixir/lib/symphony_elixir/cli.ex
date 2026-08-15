@@ -3,7 +3,7 @@ defmodule SymphonyElixir.CLI do
   Escript entrypoint for running Symphony with one or more explicit WORKFLOW.md paths.
   """
 
-  alias SymphonyElixir.LogFile
+  alias SymphonyElixir.{GroupReporter, LogFile, WorkflowGroupDashboard}
 
   @acknowledgement_switch :i_understand_that_this_will_be_running_without_the_usual_guardrails
   @acknowledgement_argument "--i-understand-that-this-will-be-running-without-the-usual-guardrails"
@@ -16,12 +16,14 @@ defmodule SymphonyElixir.CLI do
           set_logs_root: (String.t() -> :ok | {:error, term()}),
           set_server_port_override: (non_neg_integer() | nil -> :ok | {:error, term()}),
           ensure_all_started: (-> ensure_started_result()),
-          run_workflow_group: ([String.t()], String.t() -> :ok | {:error, String.t()})
+          run_workflow_group: ([String.t()], String.t(), non_neg_integer() -> :ok | {:error, String.t()})
         }
   @type workflow_group_deps :: %{
           executable_path: (-> {:ok, String.t()} | {:error, String.t()}),
           open_port: (String.t(), [String.t()], [{charlist(), charlist()}] -> {:ok, term()} | {:error, term()}),
           close_port: (term() -> term()),
+          start_dashboard: (non_neg_integer() -> Supervisor.on_start()),
+          put_snapshot: (String.t(), Path.t(), map() -> :ok),
           install_shutdown_handlers: ((-> :ok) -> (-> term())),
           write_stderr: (IO.chardata() -> term())
         }
@@ -63,10 +65,10 @@ defmodule SymphonyElixir.CLI do
 
       {opts, workflow_paths, []} when length(workflow_paths) > 1 ->
         with :ok <- require_guardrails_acknowledgement(opts),
-             :ok <- reject_shared_server_port(opts),
              {:ok, logs_root} <- require_group_logs_root(opts),
+             {:ok, server_port} <- require_group_server_port(opts),
              {:ok, expanded_paths} <- validate_workflow_paths(workflow_paths, deps) do
-          deps.run_workflow_group.(expanded_paths, logs_root)
+          deps.run_workflow_group.(expanded_paths, logs_root, server_port)
         end
 
       _ ->
@@ -94,16 +96,18 @@ defmodule SymphonyElixir.CLI do
   end
 
   @doc false
-  @spec supervise_workflows([Path.t()], Path.t()) :: {:error, String.t()}
-  def supervise_workflows(workflow_paths, logs_root) do
-    supervise_workflows(workflow_paths, logs_root, runtime_workflow_group_deps())
+  @spec supervise_workflows([Path.t()], Path.t(), non_neg_integer()) :: {:error, String.t()}
+  def supervise_workflows(workflow_paths, logs_root, server_port) do
+    supervise_workflows(workflow_paths, logs_root, server_port, runtime_workflow_group_deps())
   end
 
   @doc false
-  @spec supervise_workflows([Path.t()], Path.t(), workflow_group_deps()) :: {:error, String.t()}
-  def supervise_workflows(workflow_paths, logs_root, deps)
-      when is_list(workflow_paths) and is_binary(logs_root) do
+  @spec supervise_workflows([Path.t()], Path.t(), non_neg_integer(), workflow_group_deps()) ::
+          {:error, String.t()}
+  def supervise_workflows(workflow_paths, logs_root, server_port, deps)
+      when is_list(workflow_paths) and is_binary(logs_root) and is_integer(server_port) do
     with {:ok, executable} <- deps.executable_path.(),
+         {:ok, _dashboard} <- deps.start_dashboard.(server_port),
          {:ok, children} <- start_workflow_children(workflow_paths, logs_root, executable, deps) do
       remove_shutdown_handlers =
         deps.install_shutdown_handlers.(fn -> close_workflow_children(children, nil, deps) end)
@@ -129,7 +133,7 @@ defmodule SymphonyElixir.CLI do
       set_logs_root: &set_logs_root/1,
       set_server_port_override: &set_server_port_override/1,
       ensure_all_started: ensure_all_started,
-      run_workflow_group: &supervise_workflows/2
+      run_workflow_group: &supervise_workflows/3
     }
   end
 
@@ -138,17 +142,11 @@ defmodule SymphonyElixir.CLI do
       executable_path: &current_executable_path/0,
       open_port: &open_workflow_port/3,
       close_port: &close_workflow_port/1,
+      start_dashboard: &WorkflowGroupDashboard.start_supervisor/1,
+      put_snapshot: &WorkflowGroupDashboard.put_snapshot/3,
       install_shutdown_handlers: &install_shutdown_handlers/1,
       write_stderr: &IO.write(:stderr, &1)
     }
-  end
-
-  defp reject_shared_server_port(opts) do
-    if Keyword.has_key?(opts, :port) do
-      {:error, "--port cannot be shared by multiple workflows; configure server.port in each WORKFLOW.md"}
-    else
-      :ok
-    end
   end
 
   defp require_group_logs_root(opts) do
@@ -156,6 +154,19 @@ defmodule SymphonyElixir.CLI do
       {:ok, nil} -> {:error, "--logs-root is required when running multiple workflows"}
       {:ok, logs_root} -> {:ok, Path.expand(logs_root)}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp require_group_server_port(opts) do
+    case Keyword.get_values(opts, :port) do
+      values when values != [] ->
+        case List.last(values) do
+          port when is_integer(port) and port >= 0 -> {:ok, port}
+          _ -> {:error, usage_message()}
+        end
+
+      [] ->
+        {:error, "--port is required when running multiple workflows"}
     end
   end
 
@@ -290,9 +301,14 @@ defmodule SymphonyElixir.CLI do
 
   defp await_workflow_child(children, deps) do
     receive do
-      {port, {:data, data}} when is_map_key(children, port) ->
+      {port, {:data, {:eol, line}}} when is_map_key(children, port) ->
+        child = Map.fetch!(children, port)
+        handle_child_line(child, line, deps)
+        await_workflow_child(children, deps)
+
+      {port, {:data, {:noeol, line}}} when is_map_key(children, port) ->
         %{label: label} = Map.fetch!(children, port)
-        deps.write_stderr.(["[", label, "] ", data])
+        deps.write_stderr.(["[", label, "] ", line])
         await_workflow_child(children, deps)
 
       {port, {:exit_status, status}} when is_map_key(children, port) ->
@@ -307,6 +323,13 @@ defmodule SymphonyElixir.CLI do
 
       _other ->
         await_workflow_child(children, deps)
+    end
+  end
+
+  defp handle_child_line(%{label: label, workflow_path: workflow_path}, line, deps) do
+    case GroupReporter.decode_snapshot(line) do
+      {:ok, payload} -> deps.put_snapshot.(label, workflow_path, payload)
+      :error -> deps.write_stderr.(["[", label, "] ", line, "\n"])
     end
   end
 
@@ -344,6 +367,7 @@ defmodule SymphonyElixir.CLI do
           :binary,
           :exit_status,
           :stderr_to_stdout,
+          {:line, 2_000_000},
           args: Enum.map(args, &String.to_charlist/1),
           env: env
         ]

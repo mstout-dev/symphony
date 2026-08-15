@@ -112,22 +112,25 @@ To operate several repository-owned workflows as one service, pass every path in
 ```bash
 ./bin/symphony \
   --logs-root /var/log/symphony \
+  --port 4001 \
   /path/to/product-a/WORKFLOW.md \
   /path/to/product-b/WORKFLOW.md
 ```
 
 The parent process starts one isolated Symphony runtime per workflow. Each runtime keeps its own
-tracker scope, workspace root, concurrency, prompt, and optional `server.port`. If one runtime
-exits, the parent stops the others and exits nonzero so the service manager can restart the group.
+tracker scope, workspace root, concurrency, and prompt. The parent serves the existing dashboard
+once per project through the shared `--port`. If one runtime exits, the parent stops the others and
+exits nonzero so the service manager can restart the group.
 
 Optional flags:
 
 - `--logs-root` tells Symphony to write logs under a different directory (default: `./log`)
-- `--port` also starts the Phoenix observability service for a single workflow (default: disabled)
+- `--port` starts the Phoenix observability service (default: disabled)
 
-Multiple workflows require `--logs-root`; Symphony creates a stable path-derived subdirectory for
-each workflow. Configure dashboard ports in the individual `WORKFLOW.md` files because a shared
-CLI `--port` is rejected in this mode.
+Multiple workflows require both `--logs-root` and `--port`. Symphony creates a stable path-derived
+log directory for each workflow, disables child HTTP listeners, and renders every project's current
+dashboard through the one parent listener. Workflow `server.port` values still apply in
+single-workflow mode and are ignored for managed children.
 
 The `WORKFLOW.md` file uses YAML front matter for configuration, plus a Markdown body used as the
 Codex session prompt.
