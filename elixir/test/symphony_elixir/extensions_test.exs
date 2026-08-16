@@ -466,7 +466,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert dashboard_css =~ "text-decoration-thickness: 1px"
     assert dashboard_css =~ ~s("attention"\n    "projects")
     assert dashboard_css =~ ".project-table td::before"
-    assert dashboard_css =~ ~s(content: attr(data-label))
+    assert dashboard_css =~ ~s|content: attr(data-label)|
 
     favicon_conn = get(build_conn(), "/favicon.png")
     assert response(favicon_conn, 200) == File.read!("priv/static/favicon.png")
@@ -771,6 +771,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert_eventually(fn ->
       rendered = render(view)
+
       rendered =~ "Snapshot unavailable" and not (rendered =~ "Portfolio is idle.") and
         not (rendered =~ "No workflows configured.")
     end)

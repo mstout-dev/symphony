@@ -135,7 +135,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
               </div>
               <div class="attention-actions">
                 <span class="mono"><%= attention_time(item) %></span>
-                <.link patch={~p"/?project=#{item.project_id}"} class="issue-link">Project detail</.link>
+                <.link patch={"/?project=#{item.project_id}"} class="issue-link">Project detail</.link>
                 <a class="issue-link" href={"/api/v1/#{item.entry.issue_identifier}"}>JSON details</a>
               </div>
             </li>
@@ -187,7 +187,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
                     </td>
                     <td data-label="Latest update"><%= latest_running_update(project.state) %></td>
                   <% end %>
-                  <td data-label="Action"><.link patch={~p"/?project=#{project.id}"} class="detail-link">View detail</.link></td>
+                  <td data-label="Action"><.link patch={"/?project=#{project.id}"} class="detail-link">View detail</.link></td>
                 </tr>
               </tbody>
             </table>
@@ -197,7 +197,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
       <section :if={@selected_project} class="project-focus" id="project-detail">
         <nav class="focus-nav" aria-label="Project focus">
-          <.link patch={~p"/"} class="all-projects-link">← All projects</.link>
+          <.link patch="/" class="all-projects-link">← All projects</.link>
           <span>Focused on <strong><%= @selected_project.name %></strong></span>
         </nav>
         <.project_dashboard payload={@selected_project.state} now={@now} project_name={@selected_project.name} focused={true} />
@@ -575,27 +575,28 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   defp attention_entries(projects) do
     projects
-    |> Enum.flat_map(fn project ->
-      if project.state[:error] do
-        []
-      else
-        blocked =
-          Enum.map(project.state.blocked, fn entry ->
-            attention_entry(project, :blocked, entry)
-          end)
-
-        retrying =
-          Enum.map(project.state.retrying, fn entry ->
-            attention_entry(project, :retrying, entry)
-          end)
-
-        blocked ++ retrying
-      end
-    end)
+    |> Enum.flat_map(&project_attention_entries/1)
     |> Enum.sort_by(fn item ->
-      {if(item.kind == :blocked, do: 0, else: 1), attention_sort_time(item), item.project_name,
-       item.entry.issue_identifier}
+      {if(item.kind == :blocked, do: 0, else: 1), attention_sort_time(item), item.project_name, item.entry.issue_identifier}
     end)
+  end
+
+  defp project_attention_entries(project) do
+    if project.state[:error] do
+      []
+    else
+      blocked =
+        Enum.map(project.state.blocked, fn entry ->
+          attention_entry(project, :blocked, entry)
+        end)
+
+      retrying =
+        Enum.map(project.state.retrying, fn entry ->
+          attention_entry(project, :retrying, entry)
+        end)
+
+      blocked ++ retrying
+    end
   end
 
   defp attention_entry(project, kind, entry) do
