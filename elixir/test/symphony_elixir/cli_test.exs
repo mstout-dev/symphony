@@ -144,15 +144,43 @@ defmodule SymphonyElixir.CLITest do
     logs_root = Path.expand("tmp/symphony-logs")
 
     deps =
-      group_deps(fn workflow_paths, group_logs_root, server_port ->
-        send(parent, {:group_started, workflow_paths, group_logs_root, server_port})
+      group_deps(fn workflow_paths, group_logs_root, server_port, server_host ->
+        send(parent, {:group_started, workflow_paths, group_logs_root, server_port, server_host})
         :ok
       end)
 
     assert :ok =
-             CLI.evaluate([@ack_flag, "--logs-root", "tmp/symphony-logs", "--port", "4001" | paths], deps)
+             CLI.evaluate(
+               [
+                 @ack_flag,
+                 "--logs-root",
+                 "tmp/symphony-logs",
+                 "--host",
+                 "0.0.0.0",
+                 "--port",
+                 "4001"
+                 | paths
+               ],
+               deps
+             )
 
-    assert_received {:group_started, ^expanded_paths, ^logs_root, 4001}
+    assert_received {:group_started, ^expanded_paths, ^logs_root, 4001, "0.0.0.0"}
+  end
+
+  test "defaults grouped dashboard host to loopback" do
+    parent = self()
+    paths = ["tmp/life-os/WORKFLOW.md", "tmp/next-forge/WORKFLOW.md"]
+
+    deps =
+      group_deps(fn _workflow_paths, _logs_root, _server_port, server_host ->
+        send(parent, {:group_host, server_host})
+        :ok
+      end)
+
+    assert :ok =
+             CLI.evaluate([@ack_flag, "--logs-root", "tmp/logs", "--port", "4001" | paths], deps)
+
+    assert_received {:group_host, "127.0.0.1"}
   end
 
   test "rejects missing and duplicate workflow paths before starting a group" do
@@ -160,7 +188,7 @@ defmodule SymphonyElixir.CLITest do
 
     deps =
       group_deps(
-        fn _workflow_paths, _logs_root, _server_port ->
+        fn _workflow_paths, _logs_root, _server_port, _server_host ->
           send(parent, :group_started)
           :ok
         end,
@@ -202,7 +230,7 @@ defmodule SymphonyElixir.CLITest do
   end
 
   test "requires one logs root and one shared port for workflow groups" do
-    deps = group_deps(fn _workflow_paths, _logs_root, _server_port -> :ok end)
+    deps = group_deps(fn _workflow_paths, _logs_root, _server_port, _server_host -> :ok end)
     paths = ["tmp/life-os/WORKFLOW.md", "tmp/next-forge/WORKFLOW.md"]
 
     assert {:error, logs_message} = CLI.evaluate([@ack_flag | paths], deps)
@@ -228,8 +256,8 @@ defmodule SymphonyElixir.CLITest do
         {:ok, port}
       end,
       close_port: fn port -> send(parent, {:child_closed, port}) end,
-      start_dashboard: fn port ->
-        send(parent, {:dashboard_started, port})
+      start_dashboard: fn port, host ->
+        send(parent, {:dashboard_started, port, host})
         {:ok, self()}
       end,
       put_snapshot: fn label, path, payload -> send(parent, {:snapshot, label, path, payload}) end,
@@ -237,9 +265,12 @@ defmodule SymphonyElixir.CLITest do
       write_stderr: fn output -> send(parent, {:stderr, IO.iodata_to_binary(output)}) end
     }
 
-    task = Task.async(fn -> CLI.supervise_workflows(workflow_paths, logs_root, 4001, runtime_deps) end)
+    task =
+      Task.async(fn ->
+        CLI.supervise_workflows(workflow_paths, logs_root, 4001, "0.0.0.0", runtime_deps)
+      end)
 
-    assert_receive {:dashboard_started, 4001}
+    assert_receive {:dashboard_started, 4001, "0.0.0.0"}
     assert_receive {:child_opened, first_port, "/tmp/symphony", first_args, first_env}
     assert_receive {:child_opened, second_port, "/tmp/symphony", second_args, second_env}
 
@@ -278,7 +309,7 @@ defmodule SymphonyElixir.CLITest do
         end
       end,
       close_port: fn port -> send(parent, {:child_closed, port}) end,
-      start_dashboard: fn _port -> {:ok, self()} end,
+      start_dashboard: fn _port, _host -> {:ok, self()} end,
       put_snapshot: fn _label, _path, _payload -> :ok end,
       install_shutdown_handlers: fn _shutdown -> fn -> :ok end end,
       write_stderr: fn _output -> :ok end

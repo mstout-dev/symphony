@@ -7,7 +7,12 @@ defmodule SymphonyElixir.CLI do
 
   @acknowledgement_switch :i_understand_that_this_will_be_running_without_the_usual_guardrails
   @acknowledgement_argument "--i-understand-that-this-will-be-running-without-the-usual-guardrails"
-  @switches [{@acknowledgement_switch, :boolean}, logs_root: :string, port: :integer]
+  @switches [
+    {@acknowledgement_switch, :boolean},
+    logs_root: :string,
+    host: :string,
+    port: :integer
+  ]
 
   @type ensure_started_result :: {:ok, [atom()]} | {:error, term()}
   @type deps :: %{
@@ -16,13 +21,14 @@ defmodule SymphonyElixir.CLI do
           set_logs_root: (String.t() -> :ok | {:error, term()}),
           set_server_port_override: (non_neg_integer() | nil -> :ok | {:error, term()}),
           ensure_all_started: (-> ensure_started_result()),
-          run_workflow_group: ([String.t()], String.t(), non_neg_integer() -> :ok | {:error, String.t()})
+          run_workflow_group: ([String.t()], String.t(), non_neg_integer(), String.t() ->
+                                 :ok | {:error, String.t()})
         }
   @type workflow_group_deps :: %{
           executable_path: (-> {:ok, String.t()} | {:error, String.t()}),
           open_port: (String.t(), [String.t()], [{charlist(), charlist()}] -> {:ok, term()} | {:error, term()}),
           close_port: (term() -> term()),
-          start_dashboard: (non_neg_integer() -> Supervisor.on_start()),
+          start_dashboard: (non_neg_integer(), String.t() -> Supervisor.on_start()),
           put_snapshot: (String.t(), Path.t(), map() -> :ok),
           install_shutdown_handlers: ((-> :ok) -> (-> term())),
           write_stderr: (IO.chardata() -> term())
@@ -67,8 +73,9 @@ defmodule SymphonyElixir.CLI do
         with :ok <- require_guardrails_acknowledgement(opts),
              {:ok, logs_root} <- require_group_logs_root(opts),
              {:ok, server_port} <- require_group_server_port(opts),
+             {:ok, server_host} <- group_server_host(opts),
              {:ok, expanded_paths} <- validate_workflow_paths(workflow_paths, deps) do
-          deps.run_workflow_group.(expanded_paths, logs_root, server_port)
+          deps.run_workflow_group.(expanded_paths, logs_root, server_port, server_host)
         end
 
       _ ->
@@ -98,16 +105,44 @@ defmodule SymphonyElixir.CLI do
   @doc false
   @spec supervise_workflows([Path.t()], Path.t(), non_neg_integer()) :: {:error, String.t()}
   def supervise_workflows(workflow_paths, logs_root, server_port) do
-    supervise_workflows(workflow_paths, logs_root, server_port, runtime_workflow_group_deps())
+    supervise_workflows(workflow_paths, logs_root, server_port, "127.0.0.1")
+  end
+
+  @doc false
+  @spec supervise_workflows([Path.t()], Path.t(), non_neg_integer(), String.t()) ::
+          {:error, String.t()}
+  def supervise_workflows(workflow_paths, logs_root, server_port, server_host)
+      when is_binary(server_host) do
+    supervise_workflows(
+      workflow_paths,
+      logs_root,
+      server_port,
+      server_host,
+      runtime_workflow_group_deps()
+    )
   end
 
   @doc false
   @spec supervise_workflows([Path.t()], Path.t(), non_neg_integer(), workflow_group_deps()) ::
           {:error, String.t()}
   def supervise_workflows(workflow_paths, logs_root, server_port, deps)
-      when is_list(workflow_paths) and is_binary(logs_root) and is_integer(server_port) do
+      when is_map(deps) do
+    supervise_workflows(workflow_paths, logs_root, server_port, "127.0.0.1", deps)
+  end
+
+  @doc false
+  @spec supervise_workflows(
+          [Path.t()],
+          Path.t(),
+          non_neg_integer(),
+          String.t(),
+          workflow_group_deps()
+        ) :: {:error, String.t()}
+  def supervise_workflows(workflow_paths, logs_root, server_port, server_host, deps)
+      when is_list(workflow_paths) and is_binary(logs_root) and is_integer(server_port) and
+             is_binary(server_host) and is_map(deps) do
     with {:ok, executable} <- deps.executable_path.(),
-         {:ok, _dashboard} <- deps.start_dashboard.(server_port),
+         {:ok, _dashboard} <- deps.start_dashboard.(server_port, server_host),
          {:ok, children} <- start_workflow_children(workflow_paths, logs_root, executable, deps) do
       remove_shutdown_handlers =
         deps.install_shutdown_handlers.(fn -> close_workflow_children(children, nil, deps) end)
@@ -122,7 +157,7 @@ defmodule SymphonyElixir.CLI do
 
   @spec usage_message() :: String.t()
   defp usage_message do
-    "Usage: symphony [--logs-root <path>] [--port <port>] [path-to-WORKFLOW.md ...]"
+    "Usage: symphony [--logs-root <path>] [--host <address>] [--port <port>] [path-to-WORKFLOW.md ...]"
   end
 
   @spec runtime_deps() :: deps()
@@ -133,7 +168,7 @@ defmodule SymphonyElixir.CLI do
       set_logs_root: &set_logs_root/1,
       set_server_port_override: &set_server_port_override/1,
       ensure_all_started: ensure_all_started,
-      run_workflow_group: &supervise_workflows/3
+      run_workflow_group: &supervise_workflows/4
     }
   end
 
@@ -142,7 +177,7 @@ defmodule SymphonyElixir.CLI do
       executable_path: &current_executable_path/0,
       open_port: &open_workflow_port/3,
       close_port: &close_workflow_port/1,
-      start_dashboard: &WorkflowGroupDashboard.start_supervisor/1,
+      start_dashboard: &WorkflowGroupDashboard.start_supervisor/2,
       put_snapshot: &WorkflowGroupDashboard.put_snapshot/3,
       install_shutdown_handlers: &install_shutdown_handlers/1,
       write_stderr: &IO.write(:stderr, &1)
@@ -167,6 +202,13 @@ defmodule SymphonyElixir.CLI do
 
       [] ->
         {:error, "--port is required when running multiple workflows"}
+    end
+  end
+
+  defp group_server_host(opts) do
+    case Keyword.get_values(opts, :host) do
+      [] -> {:ok, "127.0.0.1"}
+      values -> {:ok, List.last(values)}
     end
   end
 

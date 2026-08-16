@@ -11,15 +11,16 @@ defmodule SymphonyElixir.WorkflowGroupDashboard do
     GenServer.start_link(__MODULE__, %{}, name: Keyword.get(opts, :name, __MODULE__))
   end
 
-  @spec start_supervisor(non_neg_integer()) :: Supervisor.on_start()
-  def start_supervisor(port) when is_integer(port) and port >= 0 do
+  @spec start_supervisor(non_neg_integer(), String.t()) :: Supervisor.on_start()
+  def start_supervisor(port, host \\ "127.0.0.1")
+      when is_integer(port) and port >= 0 and is_binary(host) do
     with {:ok, _started} <- Application.ensure_all_started(:phoenix_live_view),
          {:ok, _started} <- Application.ensure_all_started(:bandit) do
-      start_supervisor_children(port)
+      start_supervisor_children(port, host)
     end
   end
 
-  defp start_supervisor_children(port) do
+  defp start_supervisor_children(port, host) do
     # ponytail: the group needs only one state process and the existing web server.
     pubsub =
       if Process.whereis(SymphonyElixir.PubSub) do
@@ -32,7 +33,7 @@ defmodule SymphonyElixir.WorkflowGroupDashboard do
       pubsub ++
         [
           __MODULE__,
-          {HttpServer, port: port, host: "127.0.0.1", group_dashboard: __MODULE__}
+          {HttpServer, port: port, host: host, group_dashboard: __MODULE__}
         ],
       strategy: :one_for_one
     )
