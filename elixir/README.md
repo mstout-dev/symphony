@@ -99,7 +99,7 @@ chmod +x ./symphony-v0.0.1-macos_arm64
 
 ## Configuration
 
-Pass a custom workflow file path to `./bin/symphony` when starting the service:
+Pass one or more custom workflow file paths to `./bin/symphony` when starting the service:
 
 ```bash
 ./bin/symphony /path/to/custom/WORKFLOW.md
@@ -107,10 +107,30 @@ Pass a custom workflow file path to `./bin/symphony` when starting the service:
 
 If no path is passed, Symphony defaults to `./WORKFLOW.md`.
 
+To operate several repository-owned workflows as one service, pass every path in the same command:
+
+```bash
+./bin/symphony \
+  --logs-root /var/log/symphony \
+  --port 4001 \
+  /path/to/product-a/WORKFLOW.md \
+  /path/to/product-b/WORKFLOW.md
+```
+
+The parent process starts one isolated Symphony runtime per workflow. Each runtime keeps its own
+tracker scope, workspace root, concurrency, and prompt. The parent serves one portfolio operations
+view through the shared `--port`, with cross-project attention and URL-backed project detail. If one runtime exits, the parent stops the others and
+exits nonzero so the service manager can restart the group.
+
 Optional flags:
 
 - `--logs-root` tells Symphony to write logs under a different directory (default: `./log`)
-- `--port` also starts the Phoenix observability service (default: disabled)
+- `--port` starts the Phoenix observability service (default: disabled)
+
+Multiple workflows require both `--logs-root` and `--port`. Symphony creates a stable path-derived
+log directory for each workflow, disables child HTTP listeners, and renders every project's current
+snapshot in the portfolio through the one parent listener. Workflow `server.port` values still apply in
+single-workflow mode and are ignored for managed children.
 
 The `WORKFLOW.md` file uses YAML front matter for configuration, plus a Markdown body used as the
 Codex session prompt.
@@ -296,6 +316,9 @@ The observability UI now runs on a minimal Phoenix stack:
 - Bandit as the HTTP server
 - Phoenix dependency static assets for the LiveView client bootstrap
 - Tracker issue identifiers link to the tracker-provided URL when it uses `http` or `https`
+- Multi-workflow parents render one aggregate portfolio header, attention queue, and project comparison
+- Project detail remains in the portfolio view and is shareable with the `project` query parameter
+- Rate-limit detail is shown only inside a selected project's existing operational detail
 
 ## Project Layout
 

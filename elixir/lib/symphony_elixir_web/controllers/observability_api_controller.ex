@@ -6,16 +6,29 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   use Phoenix.Controller, formats: [:json]
 
   alias Plug.Conn
+  alias SymphonyElixir.WorkflowGroupDashboard
   alias SymphonyElixirWeb.{Endpoint, Presenter}
 
   @spec state(Conn.t(), map()) :: Conn.t()
   def state(conn, _params) do
-    json(conn, Presenter.state_payload(orchestrator(), snapshot_timeout_ms()))
+    payload =
+      case group_dashboard() do
+        nil -> Presenter.state_payload(orchestrator(), snapshot_timeout_ms())
+        server -> WorkflowGroupDashboard.state_payload(server)
+      end
+
+    json(conn, payload)
   end
 
   @spec issue(Conn.t(), map()) :: Conn.t()
   def issue(conn, %{"issue_identifier" => issue_identifier}) do
-    case Presenter.issue_payload(issue_identifier, orchestrator(), snapshot_timeout_ms()) do
+    result =
+      case group_dashboard() do
+        nil -> Presenter.issue_payload(issue_identifier, orchestrator(), snapshot_timeout_ms())
+        server -> WorkflowGroupDashboard.issue_payload(issue_identifier, server)
+      end
+
+    case result do
       {:ok, payload} ->
         json(conn, payload)
 
@@ -26,7 +39,13 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
 
   @spec refresh(Conn.t(), map()) :: Conn.t()
   def refresh(conn, _params) do
-    case Presenter.refresh_payload(orchestrator()) do
+    result =
+      case group_dashboard() do
+        nil -> Presenter.refresh_payload(orchestrator())
+        _server -> {:error, :unavailable}
+      end
+
+    case result do
       {:ok, payload} ->
         conn
         |> put_status(202)
@@ -56,6 +75,8 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   defp orchestrator do
     Endpoint.config(:orchestrator) || SymphonyElixir.Orchestrator
   end
+
+  defp group_dashboard, do: Endpoint.config(:group_dashboard)
 
   defp snapshot_timeout_ms do
     Endpoint.config(:snapshot_timeout_ms) || 15_000

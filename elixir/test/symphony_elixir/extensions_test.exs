@@ -3,6 +3,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
+  import ExUnit.CaptureIO
 
   alias SymphonyElixir.Linear.Adapter
   alias SymphonyElixir.Tracker.Memory
@@ -463,6 +464,9 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert dashboard_css =~ "[data-phx-main].phx-connected .status-badge-live"
     assert dashboard_css =~ "[data-phx-main].phx-connected .status-badge-offline"
     assert dashboard_css =~ "text-decoration-thickness: 1px"
+    assert dashboard_css =~ ~s("attention"\n    "projects")
+    assert dashboard_css =~ ".project-table td::before"
+    assert dashboard_css =~ ~s|content: attr(data-label)|
 
     favicon_conn = get(build_conn(), "/favicon.png")
     assert response(favicon_conn, 200) == File.read!("priv/static/favicon.png")
@@ -563,6 +567,214 @@ defmodule SymphonyElixir.ExtensionsTest do
     end)
 
     refute render(view) =~ "javascript:alert"
+  end
+
+  test "group dashboard renders one portfolio and URL-backed project detail" do
+    group_name = Module.concat(__MODULE__, :WorkflowGroupDashboard)
+    first_orchestrator = Module.concat(__MODULE__, :FirstGroupOrchestrator)
+    second_orchestrator = Module.concat(__MODULE__, :SecondGroupOrchestrator)
+    first_snapshot = static_snapshot()
+
+    second_snapshot =
+      update_in(first_snapshot.running, fn [entry] ->
+        [%{entry | identifier: "NF-HTTP", issue_url: "https://example.org/issues/NF-HTTP"}]
+      end)
+
+    start_supervised!(
+      Supervisor.child_spec(
+        {StaticOrchestrator, name: first_orchestrator, snapshot: first_snapshot},
+        id: first_orchestrator
+      )
+    )
+
+    start_supervised!(
+      Supervisor.child_spec(
+        {StaticOrchestrator, name: second_orchestrator, snapshot: second_snapshot},
+        id: second_orchestrator
+      )
+    )
+
+    start_supervised!({SymphonyElixir.WorkflowGroupDashboard, name: group_name})
+
+    SymphonyElixir.WorkflowGroupDashboard.put_snapshot(
+      "life-os-test",
+      "/tmp/life-os/WORKFLOW.md",
+      SymphonyElixirWeb.Presenter.state_payload(first_orchestrator, 50),
+      group_name
+    )
+
+    SymphonyElixir.WorkflowGroupDashboard.put_snapshot(
+      "next-forge-test",
+      "/tmp/next-forge/WORKFLOW.md",
+      SymphonyElixirWeb.Presenter.state_payload(second_orchestrator, 50),
+      group_name
+    )
+
+    start_test_endpoint(group_dashboard: group_name)
+
+    {:ok, view, html} = live(build_conn(), "/")
+    assert html =~ "life-os"
+    assert html =~ "next-forge"
+    assert html =~ "Portfolio Operations"
+    assert html =~ "Needs attention"
+    assert html =~ "Project health"
+    assert html =~ "Workflows"
+    assert html =~ ~s(href="/?project=life-os-test")
+    assert html =~ ~s(href="/?project=next-forge-test")
+    refute html =~ "Operations Dashboard"
+    refute html =~ "Project Operations"
+    refute html =~ "Offline"
+    assert has_element?(view, ~s([data-metric="workflows"] .metric-value), "2")
+    assert has_element?(view, ~s([data-metric="running"] .metric-value), "2")
+    assert has_element?(view, ~s([data-metric="retrying"] .metric-value), "2")
+    assert has_element?(view, ~s([data-metric="blocked"] .metric-value), "2")
+    assert has_element?(view, ~s([data-metric="total-tokens"] .metric-value), "24")
+
+    blocked_position = html |> :binary.match("MT-BLOCKED") |> elem(0)
+    retry_position = html |> :binary.match("MT-RETRY") |> elem(0)
+    assert blocked_position < retry_position
+
+    {:ok, _view, selected_html} = live(build_conn(), "/?project=next-forge-test")
+    assert selected_html =~ "Project Operations"
+    assert selected_html =~ "Focused on <strong>next-forge</strong>"
+    assert selected_html =~ "← All projects"
+    assert selected_html =~ ~s(href="/api/v1/NF-HTTP")
+    refute selected_html =~ ~s(href="/api/v1/MT-HTTP")
+
+    state_payload = json_response(get(build_conn(), "/api/v1/state"), 200)
+    assert Enum.map(state_payload["projects"], & &1["name"]) == ["life-os", "next-forge"]
+
+    assert %{"project" => "next-forge", "status" => "running"} =
+             json_response(get(build_conn(), "/api/v1/NF-HTTP"), 200)
+
+    assert {:ok, %{status: "retrying"}} =
+             SymphonyElixir.WorkflowGroupDashboard.issue_payload("MT-RETRY", group_name)
+
+    assert {:ok, %{status: "blocked"}} =
+             SymphonyElixir.WorkflowGroupDashboard.issue_payload("MT-BLOCKED", group_name)
+
+    SymphonyElixir.WorkflowGroupDashboard.put_snapshot(
+      "unavailable-test",
+      "/tmp/unavailable/WORKFLOW.md",
+      %{error: %{code: "snapshot_unavailable"}},
+      group_name
+    )
+
+    assert_eventually(fn ->
+      updated_html = render(element(view, ".project-health-card"))
+      updated_html =~ "Snapshot unavailable" and updated_html =~ "unavailable"
+    end)
+
+    assert {:error, :issue_not_found} =
+             SymphonyElixir.WorkflowGroupDashboard.issue_payload("MISSING", group_name)
+  end
+
+  test "managed child reporter frames snapshots and rejects invalid frames" do
+    previous_managed_child = System.get_env("SYMPHONY_MANAGED_CHILD")
+
+    on_exit(fn ->
+      if previous_managed_child do
+        System.put_env("SYMPHONY_MANAGED_CHILD", previous_managed_child)
+      else
+        System.delete_env("SYMPHONY_MANAGED_CHILD")
+      end
+    end)
+
+    System.delete_env("SYMPHONY_MANAGED_CHILD")
+    assert :ignore = SymphonyElixir.GroupReporter.start_link()
+
+    System.put_env("SYMPHONY_MANAGED_CHILD", "1")
+
+    output =
+      capture_io(fn ->
+        {:ok, reporter} = SymphonyElixir.GroupReporter.start_link()
+        send(reporter, :observability_updated)
+        Process.sleep(25)
+        GenServer.stop(reporter)
+      end)
+
+    assert output =~ "SYMPHONY_GROUP_SNAPSHOT_V1:"
+
+    payload = %{counts: %{running: 1}, running: [%{issue_identifier: "TEST-1"}]}
+    encoded_payload = SymphonyElixir.GroupReporter.encode_snapshot(payload)
+    assert {:ok, ^payload} = SymphonyElixir.GroupReporter.decode_snapshot(encoded_payload)
+    assert :error = SymphonyElixir.GroupReporter.decode_snapshot("not a frame")
+
+    encoded_atom = Base.encode64(:erlang.term_to_binary(:not_a_map))
+
+    assert :error =
+             SymphonyElixir.GroupReporter.decode_snapshot("SYMPHONY_GROUP_SNAPSHOT_V1:" <> encoded_atom)
+
+    assert :error =
+             SymphonyElixir.GroupReporter.decode_snapshot("SYMPHONY_GROUP_SNAPSHOT_V1:" <> Base.encode64("not an erlang term"))
+  end
+
+  test "group supervisor owns the one existing HTTP server" do
+    {:ok, dashboard} = SymphonyElixir.WorkflowGroupDashboard.start_link()
+    GenServer.stop(dashboard)
+
+    {:ok, supervisor} = SymphonyElixir.WorkflowGroupDashboard.start_supervisor(0)
+
+    assert is_integer(wait_for_bound_port())
+    assert %{projects: []} = SymphonyElixir.WorkflowGroupDashboard.state_payload()
+
+    SymphonyElixir.WorkflowGroupDashboard.put_snapshot(
+      "life-os-default",
+      "/tmp/life-os/WORKFLOW.md",
+      %{running: [], retrying: [], blocked: []}
+    )
+
+    assert %{projects: [%{name: "life-os"}]} = SymphonyElixir.WorkflowGroupDashboard.state_payload()
+    assert {:error, :issue_not_found} = SymphonyElixir.WorkflowGroupDashboard.issue_payload("MISSING")
+    Supervisor.stop(supervisor)
+  end
+
+  test "group dashboard distinguishes no workflows, portfolio idle, and unavailable snapshots" do
+    group_name = Module.concat(__MODULE__, :EmptyWorkflowGroupDashboard)
+    start_supervised!({SymphonyElixir.WorkflowGroupDashboard, name: group_name})
+    start_test_endpoint(group_dashboard: group_name)
+
+    {:ok, view, html} = live(build_conn(), "/")
+    assert html =~ "No workflows configured."
+    assert html =~ "No work needs attention."
+    refute html =~ "Portfolio is idle."
+    refute html =~ "Snapshot unavailable"
+
+    idle_state = %{
+      generated_at: "2026-08-16T00:00:00Z",
+      counts: %{running: 0, retrying: 0, blocked: 0},
+      running: [],
+      retrying: [],
+      blocked: [],
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      rate_limits: nil
+    }
+
+    SymphonyElixir.WorkflowGroupDashboard.put_snapshot(
+      "idle-test",
+      "/tmp/idle/WORKFLOW.md",
+      idle_state,
+      group_name
+    )
+
+    assert_eventually(fn -> render(view) =~ "Portfolio is idle." end)
+
+    SymphonyElixir.WorkflowGroupDashboard.put_snapshot(
+      "unavailable-test",
+      "/tmp/unavailable/WORKFLOW.md",
+      %{
+        generated_at: "2026-08-16T00:00:00Z",
+        error: %{code: "snapshot_unavailable", message: "Snapshot unavailable"}
+      },
+      group_name
+    )
+
+    assert_eventually(fn ->
+      rendered = render(view)
+
+      rendered =~ "Snapshot unavailable" and not (rendered =~ "Portfolio is idle.") and
+        not (rendered =~ "No workflows configured.")
+    end)
   end
 
   test "dashboard liveview renders an unavailable state without crashing" do

@@ -18,9 +18,9 @@ defmodule SymphonyElixir.HttpServer do
 
   @spec start_link(keyword()) :: GenServer.on_start() | :ignore
   def start_link(opts \\ []) do
-    case Keyword.get(opts, :port, Config.server_port()) do
+    case Keyword.get_lazy(opts, :port, &Config.server_port/0) do
       port when is_integer(port) and port >= 0 ->
-        host = Keyword.get(opts, :host, Config.settings!().server.host)
+        host = Keyword.get_lazy(opts, :host, fn -> Config.settings!().server.host end)
         orchestrator = Keyword.get(opts, :orchestrator, Orchestrator)
         snapshot_timeout_ms = Keyword.get(opts, :snapshot_timeout_ms, 15_000)
 
@@ -30,6 +30,7 @@ defmodule SymphonyElixir.HttpServer do
             http: [ip: ip, port: port],
             url: [host: normalize_host(host)],
             orchestrator: orchestrator,
+            group_dashboard: Keyword.get(opts, :group_dashboard),
             snapshot_timeout_ms: snapshot_timeout_ms,
             secret_key_base: secret_key_base()
           ]
