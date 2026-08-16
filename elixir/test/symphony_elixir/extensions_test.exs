@@ -713,7 +713,11 @@ defmodule SymphonyElixir.ExtensionsTest do
     {:ok, dashboard} = SymphonyElixir.WorkflowGroupDashboard.start_link()
     GenServer.stop(dashboard)
 
-    {:ok, supervisor} = SymphonyElixir.WorkflowGroupDashboard.start_supervisor(0)
+    {:ok, default_supervisor} = SymphonyElixir.WorkflowGroupDashboard.start_supervisor(0)
+    assert is_integer(wait_for_bound_port())
+    Supervisor.stop(default_supervisor)
+
+    {:ok, supervisor} = SymphonyElixir.WorkflowGroupDashboard.start_supervisor(0, "0.0.0.0")
 
     assert is_integer(wait_for_bound_port())
     assert %{projects: []} = SymphonyElixir.WorkflowGroupDashboard.state_payload()

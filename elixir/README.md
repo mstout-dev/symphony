@@ -112,6 +112,7 @@ To operate several repository-owned workflows as one service, pass every path in
 ```bash
 ./bin/symphony \
   --logs-root /var/log/symphony \
+  --host 0.0.0.0 \
   --port 4001 \
   /path/to/product-a/WORKFLOW.md \
   /path/to/product-b/WORKFLOW.md
@@ -125,12 +126,14 @@ exits nonzero so the service manager can restart the group.
 Optional flags:
 
 - `--logs-root` tells Symphony to write logs under a different directory (default: `./log`)
+- `--host` selects the grouped dashboard listener address (default: `127.0.0.1`)
 - `--port` starts the Phoenix observability service (default: disabled)
 
 Multiple workflows require both `--logs-root` and `--port`. Symphony creates a stable path-derived
 log directory for each workflow, disables child HTTP listeners, and renders every project's current
 snapshot in the portfolio through the one parent listener. Workflow `server.port` values still apply in
-single-workflow mode and are ignored for managed children.
+single-workflow mode and are ignored for managed children. Grouped runtimes listen on loopback by
+default; operators may select a LAN address explicitly with `--host`.
 
 The `WORKFLOW.md` file uses YAML front matter for configuration, plus a Markdown body used as the
 Codex session prompt.
