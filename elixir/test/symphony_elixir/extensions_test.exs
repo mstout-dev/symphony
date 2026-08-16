@@ -464,6 +464,9 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert dashboard_css =~ "[data-phx-main].phx-connected .status-badge-live"
     assert dashboard_css =~ "[data-phx-main].phx-connected .status-badge-offline"
     assert dashboard_css =~ "text-decoration-thickness: 1px"
+    assert dashboard_css =~ ~s("attention"\n    "projects")
+    assert dashboard_css =~ ".project-table td::before"
+    assert dashboard_css =~ ~s(content: attr(data-label))
 
     favicon_conn = get(build_conn(), "/favicon.png")
     assert response(favicon_conn, 200) == File.read!("priv/static/favicon.png")
@@ -566,7 +569,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     refute render(view) =~ "javascript:alert"
   end
 
-  test "group dashboard repeats the existing dashboard for every workflow" do
+  test "group dashboard renders one portfolio and URL-backed project detail" do
     group_name = Module.concat(__MODULE__, :WorkflowGroupDashboard)
     first_orchestrator = Module.concat(__MODULE__, :FirstGroupOrchestrator)
     second_orchestrator = Module.concat(__MODULE__, :SecondGroupOrchestrator)
@@ -609,12 +612,34 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     start_test_endpoint(group_dashboard: group_name)
 
-    {:ok, _view, html} = live(build_conn(), "/")
+    {:ok, view, html} = live(build_conn(), "/")
     assert html =~ "life-os"
     assert html =~ "next-forge"
-    assert html =~ "MT-HTTP"
-    assert html =~ "NF-HTTP"
-    assert length(String.split(html, "Operations Dashboard")) == 3
+    assert html =~ "Portfolio Operations"
+    assert html =~ "Needs attention"
+    assert html =~ "Project health"
+    assert html =~ "Workflows"
+    assert html =~ ~s(href="/?project=life-os-test")
+    assert html =~ ~s(href="/?project=next-forge-test")
+    refute html =~ "Operations Dashboard"
+    refute html =~ "Project Operations"
+    refute html =~ "Offline"
+    assert has_element?(view, ~s([data-metric="workflows"] .metric-value), "2")
+    assert has_element?(view, ~s([data-metric="running"] .metric-value), "2")
+    assert has_element?(view, ~s([data-metric="retrying"] .metric-value), "2")
+    assert has_element?(view, ~s([data-metric="blocked"] .metric-value), "2")
+    assert has_element?(view, ~s([data-metric="total-tokens"] .metric-value), "24")
+
+    blocked_position = html |> :binary.match("MT-BLOCKED") |> elem(0)
+    retry_position = html |> :binary.match("MT-RETRY") |> elem(0)
+    assert blocked_position < retry_position
+
+    {:ok, _view, selected_html} = live(build_conn(), "/?project=next-forge-test")
+    assert selected_html =~ "Project Operations"
+    assert selected_html =~ "Focused on <strong>next-forge</strong>"
+    assert selected_html =~ "← All projects"
+    assert selected_html =~ ~s(href="/api/v1/NF-HTTP")
+    refute selected_html =~ ~s(href="/api/v1/MT-HTTP")
 
     state_payload = json_response(get(build_conn(), "/api/v1/state"), 200)
     assert Enum.map(state_payload["projects"], & &1["name"]) == ["life-os", "next-forge"]
@@ -634,6 +659,11 @@ defmodule SymphonyElixir.ExtensionsTest do
       %{error: %{code: "snapshot_unavailable"}},
       group_name
     )
+
+    assert_eventually(fn ->
+      updated_html = render(element(view, ".project-health-card"))
+      updated_html =~ "Snapshot unavailable" and updated_html =~ "unavailable"
+    end)
 
     assert {:error, :issue_not_found} =
              SymphonyElixir.WorkflowGroupDashboard.issue_payload("MISSING", group_name)
@@ -697,6 +727,53 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert %{projects: [%{name: "life-os"}]} = SymphonyElixir.WorkflowGroupDashboard.state_payload()
     assert {:error, :issue_not_found} = SymphonyElixir.WorkflowGroupDashboard.issue_payload("MISSING")
     Supervisor.stop(supervisor)
+  end
+
+  test "group dashboard distinguishes no workflows, portfolio idle, and unavailable snapshots" do
+    group_name = Module.concat(__MODULE__, :EmptyWorkflowGroupDashboard)
+    start_supervised!({SymphonyElixir.WorkflowGroupDashboard, name: group_name})
+    start_test_endpoint(group_dashboard: group_name)
+
+    {:ok, view, html} = live(build_conn(), "/")
+    assert html =~ "No workflows configured."
+    assert html =~ "No work needs attention."
+    refute html =~ "Portfolio is idle."
+    refute html =~ "Snapshot unavailable"
+
+    idle_state = %{
+      generated_at: "2026-08-16T00:00:00Z",
+      counts: %{running: 0, retrying: 0, blocked: 0},
+      running: [],
+      retrying: [],
+      blocked: [],
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      rate_limits: nil
+    }
+
+    SymphonyElixir.WorkflowGroupDashboard.put_snapshot(
+      "idle-test",
+      "/tmp/idle/WORKFLOW.md",
+      idle_state,
+      group_name
+    )
+
+    assert_eventually(fn -> render(view) =~ "Portfolio is idle." end)
+
+    SymphonyElixir.WorkflowGroupDashboard.put_snapshot(
+      "unavailable-test",
+      "/tmp/unavailable/WORKFLOW.md",
+      %{
+        generated_at: "2026-08-16T00:00:00Z",
+        error: %{code: "snapshot_unavailable", message: "Snapshot unavailable"}
+      },
+      group_name
+    )
+
+    assert_eventually(fn ->
+      rendered = render(view)
+      rendered =~ "Snapshot unavailable" and not (rendered =~ "Portfolio is idle.") and
+        not (rendered =~ "No workflows configured.")
+    end)
   end
 
   test "dashboard liveview renders an unavailable state without crashing" do

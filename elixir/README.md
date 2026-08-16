@@ -118,8 +118,8 @@ To operate several repository-owned workflows as one service, pass every path in
 ```
 
 The parent process starts one isolated Symphony runtime per workflow. Each runtime keeps its own
-tracker scope, workspace root, concurrency, and prompt. The parent serves the existing dashboard
-once per project through the shared `--port`. If one runtime exits, the parent stops the others and
+tracker scope, workspace root, concurrency, and prompt. The parent serves one portfolio operations
+view through the shared `--port`, with cross-project attention and URL-backed project detail. If one runtime exits, the parent stops the others and
 exits nonzero so the service manager can restart the group.
 
 Optional flags:
@@ -129,7 +129,7 @@ Optional flags:
 
 Multiple workflows require both `--logs-root` and `--port`. Symphony creates a stable path-derived
 log directory for each workflow, disables child HTTP listeners, and renders every project's current
-dashboard through the one parent listener. Workflow `server.port` values still apply in
+snapshot in the portfolio through the one parent listener. Workflow `server.port` values still apply in
 single-workflow mode and are ignored for managed children.
 
 The `WORKFLOW.md` file uses YAML front matter for configuration, plus a Markdown body used as the
@@ -316,6 +316,9 @@ The observability UI now runs on a minimal Phoenix stack:
 - Bandit as the HTTP server
 - Phoenix dependency static assets for the LiveView client bootstrap
 - Tracker issue identifiers link to the tracker-provided URL when it uses `http` or `https`
+- Multi-workflow parents render one aggregate portfolio header, attention queue, and project comparison
+- Project detail remains in the portfolio view and is shareable with the `project` query parameter
+- Rate-limit detail is shown only inside a selected project's existing operational detail
 
 ## Project Layout
 
