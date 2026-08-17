@@ -616,7 +616,8 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "life-os"
     assert html =~ "next-forge"
     assert html =~ "Portfolio Operations"
-    assert html =~ "Needs attention"
+    assert html =~ "Today’s decisions"
+    assert html =~ "Read-only delivery signals"
     assert html =~ "Project health"
     assert html =~ "Workflows"
     assert html =~ ~s(href="/?project=life-os-test")
@@ -629,6 +630,10 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert has_element?(view, ~s([data-metric="retrying"] .metric-value), "2")
     assert has_element?(view, ~s([data-metric="blocked"] .metric-value), "2")
     assert has_element?(view, ~s([data-metric="total-tokens"] .metric-value), "24")
+    assert html =~ "Title unavailable"
+    assert html =~ "Pull request link unavailable"
+    assert html =~ "Agent-run JSON evidence"
+    assert html =~ "Supporting delivery details"
 
     blocked_position = html |> :binary.match("MT-BLOCKED") |> elem(0)
     retry_position = html |> :binary.match("MT-RETRY") |> elem(0)
@@ -740,7 +745,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     {:ok, view, html} = live(build_conn(), "/")
     assert html =~ "No workflows configured."
-    assert html =~ "No work needs attention."
+    assert html =~ "No delivery decisions need attention."
     refute html =~ "Portfolio is idle."
     refute html =~ "Snapshot unavailable"
 
