@@ -1417,8 +1417,11 @@ defmodule SymphonyElixir.Orchestrator do
         %{
           issue_id: issue_id,
           identifier: metadata.identifier,
+          title: metadata.issue.title,
           issue_url: metadata.issue.url,
           state: metadata.issue.state,
+          state_updated_at: metadata.issue.updated_at,
+          review_owner: metadata.issue.assignee_id,
           worker_host: Map.get(metadata, :worker_host),
           workspace_path: Map.get(metadata, :workspace_path),
           session_id: metadata.session_id,
@@ -1456,8 +1459,11 @@ defmodule SymphonyElixir.Orchestrator do
         %{
           issue_id: issue_id,
           identifier: Map.get(metadata, :identifier),
+          title: metadata |> Map.get(:issue, %{}) |> Map.get(:title),
           issue_url: blocked_issue_url(metadata),
           state: blocked_issue_state(metadata),
+          state_updated_at: metadata |> Map.get(:issue, %{}) |> Map.get(:updated_at),
+          review_owner: metadata |> Map.get(:issue, %{}) |> Map.get(:assignee_id),
           worker_host: Map.get(metadata, :worker_host),
           workspace_path: Map.get(metadata, :workspace_path),
           session_id: Map.get(metadata, :session_id),

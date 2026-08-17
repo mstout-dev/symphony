@@ -319,7 +319,10 @@ The observability UI now runs on a minimal Phoenix stack:
 - Bandit as the HTTP server
 - Phoenix dependency static assets for the LiveView client bootstrap
 - Tracker issue identifiers link to the tracker-provided URL when it uses `http` or `https`
-- Multi-workflow parents render one aggregate portfolio header, attention queue, and project comparison
+- Multi-workflow parents lead with a read-only **Today’s decisions** queue for supported blocked,
+  retry, review, merge, and 24-hour delivery-stage aging signals, followed by runtime totals and project
+  comparison. Decision details link to the canonical tracker issue and agent-run JSON evidence. Pull-request
+  links and review owners are shown only when the snapshot supplies them; unavailable evidence is labeled.
 - Project detail remains in the portfolio view and is shareable with the `project` query parameter
 - Rate-limit detail is shown only inside a selected project's existing operational detail
 

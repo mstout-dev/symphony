@@ -69,7 +69,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
     assigns =
       assigns
       |> assign(:summary, portfolio_summary(assigns.payload.projects, assigns.now))
-      |> assign(:attention, attention_entries(assigns.payload.projects))
+      |> assign(:attention, attention_entries(assigns.payload.projects, assigns.now))
       |> assign(:selected_project, find_project(assigns.payload.projects, assigns.selected_project_id))
 
     ~H"""
@@ -80,7 +80,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
             <p class="eyebrow">Symphony Observability</p>
             <h1 class="hero-title">Portfolio Operations</h1>
             <p class="hero-copy">
-              Current work and attention across every configured workflow in this parent runtime.
+              Read-only delivery signals across configured workflows. Linear owns work and review state; GitHub owns pull requests, checks, and review history.
             </p>
           </div>
           <div class="status-stack portfolio-status">
@@ -95,7 +95,64 @@ defmodule SymphonyElixirWeb.DashboardLive do
         </div>
       </header>
 
-      <section class="metric-grid portfolio-metrics" aria-label="Portfolio totals">
+      <section class="section-card attention-card" aria-labelledby="todays-decisions-title">
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Decision first</p>
+            <h2 id="todays-decisions-title" class="section-title">Today’s decisions</h2>
+            <p class="section-copy">
+              Material delivery exceptions only. This informational view cannot change Linear or GitHub.
+            </p>
+          </div>
+          <span class="attention-count numeric"><%= length(@attention) %> items</span>
+        </div>
+
+        <div :if={@summary.unavailable > 0} class="decision-unavailable" role="status">
+          Delivery data unavailable for <%= @summary.unavailable %> workflow(s); decisions may be incomplete.
+        </div>
+
+        <%= if @attention == [] do %>
+          <div class="calm-state" role="status">
+            <strong>No delivery decisions need attention.</strong>
+            <span>Supported blocked, retry, review, merge, and aging signals are clear. Review items outside active workflow states are unavailable.</span>
+          </div>
+        <% else %>
+          <ol class="attention-list">
+            <li :for={item <- @attention} class={"attention-item attention-item-#{item.kind}"}>
+              <div class="attention-project"><%= item.project_name %></div>
+              <div class="attention-main">
+                <span class={state_badge_class(item.kind)}><%= attention_label(item.kind) %></span>
+                <div class="decision-identity">
+                  <.issue_identifier identifier={item.entry.issue_identifier} url={item.entry.issue_url} />
+                  <strong><%= item.entry[:issue_title] || "Title unavailable" %></strong>
+                </div>
+                <span class="attention-message"><%= attention_message(item) %></span>
+              </div>
+              <dl class="decision-facts">
+                <div><dt>Stage</dt><dd><%= delivery_stage(item) %></dd></div>
+                <div><dt>Age</dt><dd><%= attention_time(item, @now) %></dd></div>
+                <div><dt>Owner</dt><dd><%= item.entry[:review_owner] || "Unavailable" %></dd></div>
+              </dl>
+              <details class="decision-details">
+                <summary>Supporting delivery details</summary>
+                <p><strong>Reason:</strong> <%= attention_message(item) %></p>
+                <nav aria-label={"Evidence for #{item.entry.issue_identifier}"}>
+                  <.issue_identifier identifier={"Open Linear"} url={item.entry.issue_url} />
+                  <%= if external_issue_url(item.entry[:pull_request_url]) do %>
+                    <a class="issue-link" href={item.entry.pull_request_url} target="_blank" rel="noopener noreferrer">Open GitHub pull request</a>
+                  <% else %>
+                    <span class="missing-evidence">Pull request link unavailable</span>
+                  <% end %>
+                  <a class="issue-link" href={"/api/v1/#{item.entry.issue_identifier}"}>Agent-run JSON evidence</a>
+                  <.link patch={"/?project=#{item.project_id}"} class="issue-link">Project detail</.link>
+                </nav>
+              </details>
+            </li>
+          </ol>
+        <% end %>
+      </section>
+
+      <section class="metric-grid portfolio-metrics" aria-label="Portfolio runtime totals">
         <.portfolio_metric label="Workflows" value={@summary.workflows} detail="Configured in this runtime." />
         <.portfolio_metric label="Running" value={@summary.running} detail="Active issue sessions." />
         <.portfolio_metric label="Retrying" value={@summary.retrying} detail="Waiting for a retry window." />
@@ -108,40 +165,6 @@ defmodule SymphonyElixirWeb.DashboardLive do
         <strong>Portfolio is idle.</strong>
         <span>Every configured workflow is available and has no running, blocked, or retrying work.</span>
       </div>
-
-      <section class="section-card attention-card">
-        <div class="section-header">
-          <div>
-            <p class="eyebrow">Attention first</p>
-            <h2 class="section-title">Needs attention</h2>
-            <p class="section-copy">Blocked work first, followed by retries in due-time order.</p>
-          </div>
-          <span class="attention-count numeric"><%= length(@attention) %> items</span>
-        </div>
-
-        <%= if @attention == [] do %>
-          <div class="calm-state" role="status">
-            <strong>No work needs attention.</strong>
-            <span>Blocked and retrying queues are clear across all available snapshots.</span>
-          </div>
-        <% else %>
-          <ol class="attention-list">
-            <li :for={item <- @attention} class={"attention-item attention-item-#{item.kind}"}>
-              <div class="attention-project"><%= item.project_name %></div>
-              <div class="attention-main">
-                <span class={state_badge_class(item.kind)}><%= attention_label(item.kind) %></span>
-                <.issue_identifier identifier={item.entry.issue_identifier} url={item.entry.issue_url} />
-                <span class="attention-message"><%= attention_message(item) %></span>
-              </div>
-              <div class="attention-actions">
-                <span class="mono"><%= attention_time(item) %></span>
-                <.link patch={"/?project=#{item.project_id}"} class="issue-link">Project detail</.link>
-                <a class="issue-link" href={"/api/v1/#{item.entry.issue_identifier}"}>JSON details</a>
-              </div>
-            </li>
-          </ol>
-        <% end %>
-      </section>
 
       <section class="section-card project-health-card">
         <div class="section-header">
@@ -573,15 +596,16 @@ defmodule SymphonyElixirWeb.DashboardLive do
   defp latest_timestamp(current, value) when value > current, do: value
   defp latest_timestamp(current, _value), do: current
 
-  defp attention_entries(projects) do
+  defp attention_entries(projects, now) do
     projects
-    |> Enum.flat_map(&project_attention_entries/1)
+    |> Enum.flat_map(&project_attention_entries(&1, now))
     |> Enum.sort_by(fn item ->
-      {if(item.kind == :blocked, do: 0, else: 1), attention_sort_time(item), item.project_name, item.entry.issue_identifier}
+      {attention_priority(item.kind), attention_sort_time(item), item.project_name,
+       item.entry.issue_identifier}
     end)
   end
 
-  defp project_attention_entries(project) do
+  defp project_attention_entries(project, now) do
     if project.state[:error] do
       []
     else
@@ -595,7 +619,25 @@ defmodule SymphonyElixirWeb.DashboardLive do
           attention_entry(project, :retrying, entry)
         end)
 
-      blocked ++ retrying
+      delivery =
+        project.state.running
+        |> Enum.map(&delivery_attention_entry(project, &1, now))
+        |> Enum.reject(&is_nil/1)
+
+      blocked ++ retrying ++ delivery
+    end
+  end
+
+  defp delivery_attention_entry(project, entry, now) do
+    normalized = entry.state |> to_string() |> String.downcase()
+
+    cond do
+      String.contains?(normalized, "review") -> attention_entry(project, :review, entry)
+      String.contains?(normalized, "merging") or String.contains?(normalized, "merge") ->
+        attention_entry(project, :merge, entry)
+
+      state_age_seconds(entry, now) >= 86_400 -> attention_entry(project, :aging, entry)
+      true -> nil
     end
   end
 
@@ -606,16 +648,63 @@ defmodule SymphonyElixirWeb.DashboardLive do
   defp attention_sort_time(%{kind: :blocked, entry: entry}), do: entry[:blocked_at] || ""
   defp attention_sort_time(%{entry: entry}), do: entry[:due_at] || "9999"
 
+  defp attention_priority(:blocked), do: 0
+  defp attention_priority(:retrying), do: 1
+  defp attention_priority(:review), do: 2
+  defp attention_priority(:merge), do: 3
+  defp attention_priority(:aging), do: 4
+
   defp attention_label(:blocked), do: "Blocked"
   defp attention_label(:retrying), do: "Retrying"
+  defp attention_label(:review), do: "Review decision"
+  defp attention_label(:merge), do: "Merge decision"
+  defp attention_label(:aging), do: "Aging delivery"
 
   defp attention_message(%{kind: :blocked, entry: entry}), do: entry.error || "Operator input required"
 
   defp attention_message(%{kind: :retrying, entry: entry}),
     do: entry.error || "Waiting for retry attempt #{entry.attempt}"
 
-  defp attention_time(%{kind: :blocked, entry: entry}), do: entry.blocked_at || "Time unavailable"
-  defp attention_time(%{kind: :retrying, entry: entry}), do: entry.due_at || "Due time unavailable"
+  defp attention_message(%{kind: :review}), do: "Human review is required"
+  defp attention_message(%{kind: :merge}), do: "Approved work is awaiting merge"
+  defp attention_message(%{kind: :aging}), do: "Delivery stage has not changed within 24 hours"
+
+  defp attention_time(%{kind: :blocked, entry: entry}, now), do: format_age(entry.blocked_at, now)
+  defp attention_time(%{kind: :retrying, entry: entry}, _now), do: entry.due_at || "Due time unavailable"
+  defp attention_time(%{entry: entry}, now), do: format_age(entry[:state_updated_at], now)
+
+  defp delivery_stage(%{kind: :blocked, entry: entry}), do: entry[:state] || "Blocked"
+  defp delivery_stage(%{kind: :retrying, entry: entry}), do: entry[:state] || "Retry queue"
+  defp delivery_stage(%{entry: entry}), do: entry[:state] || "Unavailable"
+
+  defp state_age_seconds(entry, now) do
+    case parse_datetime(entry[:state_updated_at]) do
+      %DateTime{} = updated_at -> max(DateTime.diff(now, updated_at, :second), 0)
+      nil -> 0
+    end
+  end
+
+  defp format_age(value, now) do
+    case parse_datetime(value) do
+      %DateTime{} = then ->
+        hours = max(DateTime.diff(now, then, :second), 0) |> div(3_600)
+        if hours < 24, do: "#{hours}h in state", else: "#{div(hours, 24)}d #{rem(hours, 24)}h in state"
+
+      nil ->
+        "Age unavailable"
+    end
+  end
+
+  defp parse_datetime(%DateTime{} = value), do: value
+
+  defp parse_datetime(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, parsed, _offset} -> parsed
+      _ -> nil
+    end
+  end
+
+  defp parse_datetime(_value), do: nil
 
   defp latest_running_update(%{running: []}), do: "No running update"
 
