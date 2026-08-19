@@ -41,6 +41,7 @@ defmodule SymphonyElixir.Application do
       SymphonyElixir.AgentRuntimeSupervisor,
       http_server_child(),
       status_dashboard_child(),
+      SymphonyElixir.WayfinderSnapshot,
       SymphonyElixir.GroupReporter
     ]
 

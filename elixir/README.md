@@ -119,9 +119,10 @@ To operate several repository-owned workflows as one service, pass every path in
 ```
 
 The parent process starts one isolated Symphony runtime per workflow. Each runtime keeps its own
-tracker scope, workspace root, concurrency, and prompt. The parent serves one portfolio operations
-view through the shared `--port`, with cross-project attention and URL-backed project detail. If one runtime exits, the parent stops the others and
-exits nonzero so the service manager can restart the group.
+tracker scope, workspace root, concurrency, prompt, and read-only Wayfinder snapshot. The parent
+serves portfolio operations and Wayfinder views through the shared `--port`, with cross-project
+attention and URL-backed detail. If one runtime exits, the parent stops the others and exits nonzero
+so the service manager can restart the group.
 
 Optional flags:
 
@@ -325,6 +326,20 @@ The observability UI now runs on a minimal Phoenix stack:
   links and review owners are shown only when the snapshot supplies them; unavailable evidence is labeled.
 - Project detail remains in the portfolio view and is shareable with the `project` query parameter
 - Rate-limit detail is shown only inside a selected project's existing operational detail
+- Multi-workflow parents expose a read-only **Wayfinder** view at `/?view=wayfinder`. The default
+  graph layout draws Linear `blocks` relations from prerequisite to dependent work; `layout=rails`
+  selects the compact alternate view. `project`, `map`, and `ticket` query parameters make the
+  current map and inspector selection shareable.
+- Wayfinder version one is Linear-only. Label a parent issue `wayfinder:map`, label its child issues
+  with `wayfinder:<type>` (for example, `wayfinder:edge`), and use Linear blocking relations for
+  graph edges. Each workflow refreshes one paginated project snapshot on its configured
+  `polling.interval_ms`. Completed tickets show the most recently updated top-level
+  `## Resolution` comment as a bounded excerpt and list linked Linear documents separately.
+- Wayfinder is informational: snapshots contain only map/ticket metadata, relationships, bounded
+  resolution excerpts, and document links. Raw descriptions, raw comments, tracker credentials,
+  writes, webhooks, and browser-to-Linear requests are outside this surface. A failed refresh marks
+  only the affected workflow unavailable and removes its prior snapshot rather than presenting stale
+  topology.
 
 ## Project Layout
 

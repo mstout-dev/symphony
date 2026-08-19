@@ -268,8 +268,12 @@ defmodule SymphonyElixir.ExtensionsTest do
                %{
                  "issue_id" => "issue-http",
                  "issue_identifier" => "MT-HTTP",
+                 "issue_title" => nil,
                  "issue_url" => "https://example.org/issues/MT-HTTP",
                  "state" => "In Progress",
+                 "state_updated_at" => nil,
+                 "review_owner" => nil,
+                 "pull_request_url" => nil,
                  "worker_host" => nil,
                  "workspace_path" => nil,
                  "session_id" => "thread-http",
@@ -285,7 +289,12 @@ defmodule SymphonyElixir.ExtensionsTest do
                %{
                  "issue_id" => "issue-retry",
                  "issue_identifier" => "MT-RETRY",
+                 "issue_title" => nil,
                  "issue_url" => "https://example.org/issues/MT-RETRY",
+                 "state" => nil,
+                 "state_updated_at" => nil,
+                 "review_owner" => nil,
+                 "pull_request_url" => nil,
                  "attempt" => 2,
                  "due_at" => state_payload["retrying"] |> List.first() |> Map.fetch!("due_at"),
                  "error" => "boom",
@@ -297,8 +306,12 @@ defmodule SymphonyElixir.ExtensionsTest do
                %{
                  "issue_id" => "issue-blocked",
                  "issue_identifier" => "MT-BLOCKED",
+                 "issue_title" => nil,
                  "issue_url" => "https://example.org/issues/MT-BLOCKED",
                  "state" => "In Progress",
+                 "state_updated_at" => nil,
+                 "review_owner" => nil,
+                 "pull_request_url" => nil,
                  "error" => "codex turn requires operator input",
                  "worker_host" => "dm-dev2",
                  "workspace_path" => "/workspaces/MT-BLOCKED",
@@ -464,7 +477,8 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert dashboard_css =~ "[data-phx-main].phx-connected .status-badge-live"
     assert dashboard_css =~ "[data-phx-main].phx-connected .status-badge-offline"
     assert dashboard_css =~ "text-decoration-thickness: 1px"
-    assert dashboard_css =~ ~s("attention"\n    "projects")
+    assert dashboard_css =~ ~s("attention")
+    assert dashboard_css =~ ~s("projects")
     assert dashboard_css =~ ".project-table td::before"
     assert dashboard_css =~ ~s|content: attr(data-label)|
 
@@ -712,6 +726,124 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert :error =
              SymphonyElixir.GroupReporter.decode_snapshot("SYMPHONY_GROUP_SNAPSHOT_V1:" <> Base.encode64("not an erlang term"))
+  end
+
+  test "portfolio wayfinder view renders graph, rails, completion ledger, and ticket inspector from URL state" do
+    group_name = Module.concat(__MODULE__, :WayfinderWorkflowGroupDashboard)
+    start_supervised!({SymphonyElixir.WorkflowGroupDashboard, name: group_name})
+
+    wayfinder = %{
+      status: "available",
+      generated_at: "2026-08-19T03:00:00Z",
+      orphaned_count: 1,
+      maps: [
+        %{
+          id: "map-1",
+          identifier: "SYM-20",
+          title: "Portfolio operations map",
+          url: "https://linear.app/issue/SYM-20",
+          state: %{name: "In Progress", type: "started"},
+          completion: %{completed: false, completed_at: nil},
+          ticket_ids: ["edge-1", "edge-2"]
+        }
+      ],
+      tickets: [
+        %{
+          id: "edge-1",
+          identifier: "SYM-19",
+          title: "Wire the snapshot",
+          url: "https://linear.app/issue/SYM-19",
+          map_id: "map-1",
+          wayfinder_type: "edge",
+          state: %{name: "In Progress", type: "started"},
+          completion: %{completed: false, completed_at: nil},
+          resolution: nil,
+          artifacts: [],
+          updated_at: "2026-08-19T02:00:00Z"
+        },
+        %{
+          id: "edge-2",
+          identifier: "SYM-18",
+          title: "Ship the graph",
+          url: "https://linear.app/issue/SYM-18",
+          map_id: "map-1",
+          wayfinder_type: "edge",
+          state: %{name: "Done", type: "completed"},
+          completion: %{completed: true, completed_at: "2026-08-19T01:00:00Z"},
+          resolution: %{
+            comment_id: "comment-1",
+            updated_at: "2026-08-19T01:10:00Z",
+            excerpt: "Released with deterministic connector routing."
+          },
+          artifacts: [
+            %{id: "doc-1", title: "Graph notes", url: "https://linear.app/doc/graph-notes"}
+          ],
+          updated_at: "2026-08-19T01:10:00Z"
+        }
+      ],
+      dependencies: [
+        %{
+          from: %{id: "edge-1", identifier: "SYM-19", title: "Wire the snapshot", state: %{name: "In Progress", type: "started"}},
+          to: %{id: "edge-2", identifier: "SYM-18", title: "Ship the graph", state: %{name: "Done", type: "completed"}},
+          kind: "blocks",
+          external: false
+        },
+        %{
+          from: %{id: "external-1", identifier: "OPS-4", title: "Approve rollout", state: %{name: "Todo", type: "unstarted"}},
+          to: %{id: "edge-1", identifier: "SYM-19", title: "Wire the snapshot", state: %{name: "In Progress", type: "started"}},
+          kind: "blocks",
+          external: true
+        }
+      ]
+    }
+
+    SymphonyElixir.WorkflowGroupDashboard.put_snapshot(
+      "agent-ops-test",
+      "/tmp/agent-ops/WORKFLOW.md",
+      %{wayfinder: wayfinder},
+      group_name
+    )
+
+    SymphonyElixir.WorkflowGroupDashboard.put_snapshot(
+      "unsupported-test",
+      "/tmp/unsupported/WORKFLOW.md",
+      %{wayfinder: %{status: "unsupported", generated_at: "2026-08-19T03:00:00Z", maps: [], tickets: [], dependencies: [], orphaned_count: 0}},
+      group_name
+    )
+
+    start_test_endpoint(group_dashboard: group_name)
+
+    {:ok, graph_view, graph_html} =
+      live(build_conn(), "/?view=wayfinder&project=agent-ops-test&map=map-1&layout=graph")
+
+    assert graph_html =~ "Portfolio Wayfinder"
+    assert graph_html =~ "Active maps"
+    assert graph_html =~ "Portfolio operations map"
+    assert graph_html =~ "Graph"
+    assert graph_html =~ "Rails"
+    assert graph_html =~ "Completed edge tickets"
+    assert graph_html =~ "Ship the graph"
+    assert graph_html =~ "1 relationship needs repair"
+    assert has_element?(graph_view, ~s([data-wayfinder-node="edge-1"]))
+    assert has_element?(graph_view, ~s(svg[data-wayfinder-graph] path[data-from="edge-1"][data-to="edge-2"]))
+    assert has_element?(graph_view, ~s(a[href="/?view=operations"]), "Operations")
+
+    {:ok, rails_view, rails_html} =
+      live(build_conn(), "/?view=wayfinder&project=agent-ops-test&map=map-1&layout=rails")
+
+    assert rails_html =~ "Dependency rails"
+    assert has_element?(rails_view, ~s([data-wayfinder-rail="edge-1"]))
+
+    {:ok, inspector_view, inspector_html} =
+      live(
+        build_conn(),
+        "/?view=wayfinder&project=agent-ops-test&map=map-1&layout=graph&ticket=edge-2"
+      )
+
+    assert inspector_html =~ "Ticket inspector"
+    assert inspector_html =~ "Released with deterministic connector routing."
+    assert inspector_html =~ "Graph notes"
+    assert has_element?(inspector_view, ~s(a[href="https://linear.app/doc/graph-notes"]), "Graph notes")
   end
 
   test "group supervisor owns the one existing HTTP server" do

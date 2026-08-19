@@ -5,7 +5,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   use Phoenix.LiveView, layout: {SymphonyElixirWeb.Layouts, :app}
 
-  alias SymphonyElixir.WorkflowGroupDashboard
+  alias SymphonyElixir.{WayfinderGraph, WorkflowGroupDashboard}
   alias SymphonyElixirWeb.{Endpoint, ObservabilityPubSub, Presenter}
   @runtime_tick_ms 1_000
 
@@ -16,6 +16,10 @@ defmodule SymphonyElixirWeb.DashboardLive do
       |> assign(:payload, load_payload())
       |> assign(:now, DateTime.utc_now())
       |> assign(:selected_project_id, nil)
+      |> assign(:view, "operations")
+      |> assign(:selected_map_id, nil)
+      |> assign(:wayfinder_layout, "graph")
+      |> assign(:selected_ticket_id, nil)
 
     if connected?(socket) do
       :ok = ObservabilityPubSub.subscribe()
@@ -27,7 +31,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    {:noreply, assign(socket, :selected_project_id, selected_project_id(socket.assigns.payload, params))}
+    {:noreply, assign_navigation(socket, params)}
   end
 
   @impl true
@@ -45,6 +49,18 @@ defmodule SymphonyElixirWeb.DashboardLive do
   end
 
   @impl true
+  def render(%{payload: %{projects: _projects}, view: "wayfinder"} = assigns) do
+    ~H"""
+    <.wayfinder_dashboard
+      payload={@payload}
+      selected_project_id={@selected_project_id}
+      selected_map_id={@selected_map_id}
+      layout={@wayfinder_layout}
+      selected_ticket_id={@selected_ticket_id}
+    />
+    """
+  end
+
   def render(%{payload: %{projects: _projects}} = assigns) do
     ~H"""
     <.portfolio_dashboard
@@ -74,6 +90,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
     ~H"""
     <section class="dashboard-shell portfolio-dashboard">
+      <.portfolio_nav current="operations" />
       <header class="hero-card portfolio-hero">
         <div class="hero-grid">
           <div>
@@ -225,6 +242,333 @@ defmodule SymphonyElixirWeb.DashboardLive do
         </nav>
         <.project_dashboard payload={@selected_project.state} now={@now} project_name={@selected_project.name} focused={true} />
       </section>
+    </section>
+    """
+  end
+
+  attr(:current, :string, required: true)
+
+  defp portfolio_nav(assigns) do
+    ~H"""
+    <nav class="portfolio-switch" aria-label="Portfolio view">
+      <.link patch="/?view=operations" class={if @current == "operations", do: "portfolio-switch-active"}>
+        Operations
+      </.link>
+      <.link patch="/?view=wayfinder" class={if @current == "wayfinder", do: "portfolio-switch-active"}>
+        Wayfinder
+      </.link>
+    </nav>
+    """
+  end
+
+  attr(:payload, :map, required: true)
+  attr(:selected_project_id, :string, default: nil)
+  attr(:selected_map_id, :string, default: nil)
+  attr(:layout, :string, required: true)
+  attr(:selected_ticket_id, :string, default: nil)
+
+  defp wayfinder_dashboard(assigns) do
+    selected_project = find_project(assigns.payload.projects, assigns.selected_project_id)
+    snapshot = wayfinder_for(selected_project)
+    selected_map = Enum.find(snapshot.maps, &(&1.id == assigns.selected_map_id))
+    tickets = tickets_for_map(snapshot, assigns.selected_map_id)
+    graph = WayfinderGraph.layout(tickets, snapshot.dependencies)
+    selected_ticket = Enum.find(tickets, &(&1.id == assigns.selected_ticket_id))
+
+    assigns =
+      assigns
+      |> assign(:selected_project, selected_project)
+      |> assign(:snapshot, snapshot)
+      |> assign(:selected_map, selected_map)
+      |> assign(:tickets, tickets)
+      |> assign(:graph, graph)
+      |> assign(:selected_ticket, selected_ticket)
+      |> assign(:rail_tickets, Enum.map(graph.nodes, & &1.ticket) ++ graph.repair_tickets)
+      |> assign(:active_maps, wayfinder_map_entries(assigns.payload.projects, :active))
+      |> assign(:inactive_maps, wayfinder_map_entries(assigns.payload.projects, :inactive))
+      |> assign(:completed_tickets, Enum.filter(tickets, &get_in(&1, [:completion, :completed])))
+      |> assign(:repair_count, snapshot.orphaned_count + length(graph.repair_tickets))
+      |> assign(:external_relations, external_relations(snapshot.dependencies, selected_ticket))
+
+    ~H"""
+    <section class="dashboard-shell wayfinder-dashboard">
+      <.portfolio_nav current="wayfinder" />
+
+      <header class="hero-card wayfinder-hero">
+        <div class="hero-grid">
+          <div>
+            <p class="eyebrow">Read-only portfolio topology</p>
+            <h1 class="hero-title">Portfolio Wayfinder</h1>
+            <p class="hero-copy">
+              Maps, edge tickets, and blocking relationships from Linear—arranged as the work actually depends on itself.
+            </p>
+          </div>
+          <div class="status-stack portfolio-status">
+            <span class="status-badge status-badge-live">
+              <span class="status-badge-dot"></span>
+              Parent runtime connected
+            </span>
+            <span class="last-updated">
+              Snapshot <span class="mono numeric"><%= @snapshot.generated_at %></span>
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <section class="wayfinder-project-strip" aria-label="Wayfinder projects">
+        <.link
+          :for={project <- @payload.projects}
+          patch={wayfinder_path(project.id, first_map_id(wayfinder_for(project)), @layout)}
+          class={[
+            "wayfinder-project-chip",
+            project.id == @selected_project_id && "wayfinder-project-chip-active"
+          ]}
+        >
+          <span><%= project.name %></span>
+          <small class={"wayfinder-source-#{wayfinder_for(project).status}"}>
+            <%= wayfinder_status_label(wayfinder_for(project).status) %>
+          </small>
+        </.link>
+      </section>
+
+      <section class="section-card map-library" aria-labelledby="active-maps-title">
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Map library</p>
+            <h2 id="active-maps-title" class="section-title">Active maps</h2>
+            <p class="section-copy">Open work appears first across every configured workflow.</p>
+          </div>
+          <span class="attention-count numeric"><%= length(@active_maps) %> active</span>
+        </div>
+
+        <div :if={@active_maps != []} class="map-card-grid">
+          <.link
+            :for={entry <- @active_maps}
+            patch={wayfinder_path(entry.project.id, entry.map.id, @layout)}
+            class={[
+              "map-card",
+              entry.project.id == @selected_project_id && entry.map.id == @selected_map_id && "map-card-selected"
+            ]}
+          >
+            <span class="map-card-project"><%= entry.project.name %></span>
+            <strong><%= entry.map.title %></strong>
+            <span class="map-card-meta">
+              <span class="mono"><%= entry.map.identifier %></span>
+              <span><%= length(entry.map.ticket_ids) %> tickets</span>
+            </span>
+          </.link>
+        </div>
+
+        <div :if={@active_maps == []} class="calm-state" role="status">
+          <strong>No active maps.</strong>
+          <span>Completed and abandoned maps remain available below.</span>
+        </div>
+
+        <details :if={@inactive_maps != []} class="inactive-map-drawer">
+          <summary>Completed &amp; abandoned maps · <%= length(@inactive_maps) %></summary>
+          <div class="map-card-grid">
+            <.link
+              :for={entry <- @inactive_maps}
+              patch={wayfinder_path(entry.project.id, entry.map.id, @layout)}
+              class="map-card map-card-muted"
+            >
+              <span class="map-card-project"><%= entry.project.name %></span>
+              <strong><%= entry.map.title %></strong>
+              <span class="map-card-meta mono"><%= entry.map.identifier %></span>
+            </.link>
+          </div>
+        </details>
+      </section>
+
+      <%= if @snapshot.status == "available" and @selected_map do %>
+        <section class="wayfinder-workspace">
+          <article class="section-card wayfinder-canvas-card">
+            <div class="section-header wayfinder-map-header">
+              <div>
+                <p class="eyebrow"><%= @selected_project.name %> · <%= @selected_map.identifier %></p>
+                <h2 class="section-title"><%= @selected_map.title %></h2>
+                <p class="section-copy"><%= length(@tickets) %> mapped tickets · arrows point from prerequisite to dependent work.</p>
+              </div>
+              <div class="layout-switch" aria-label="Wayfinder layout">
+                <.link
+                  patch={wayfinder_path(@selected_project.id, @selected_map.id, "graph", @selected_ticket_id)}
+                  class={if @layout == "graph", do: "layout-switch-active"}
+                >Graph</.link>
+                <.link
+                  patch={wayfinder_path(@selected_project.id, @selected_map.id, "rails", @selected_ticket_id)}
+                  class={if @layout == "rails", do: "layout-switch-active"}
+                >Rails</.link>
+              </div>
+            </div>
+
+            <%= if @layout == "graph" do %>
+              <div class="wayfinder-graph-scroll">
+                <div class="wayfinder-graph" style={"width: #{@graph.width}px; height: #{@graph.height}px"}>
+                  <svg
+                    data-wayfinder-graph
+                    width={@graph.width}
+                    height={@graph.height}
+                    viewBox={"0 0 #{@graph.width} #{@graph.height}"}
+                    role="img"
+                    aria-label={"Dependency graph for #{@selected_map.title}"}
+                  >
+                    <defs>
+                      <marker id="wayfinder-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                        <path d="M 0 0 L 10 5 L 0 10 z" class="wayfinder-arrowhead" />
+                      </marker>
+                    </defs>
+                    <path
+                      :for={edge <- @graph.edges}
+                      d={edge.path}
+                      data-from={edge.from_id}
+                      data-to={edge.to_id}
+                      class="wayfinder-connector"
+                      marker-end="url(#wayfinder-arrow)"
+                    />
+                  </svg>
+
+                  <.link
+                    :for={node <- @graph.nodes}
+                    patch={wayfinder_path(@selected_project.id, @selected_map.id, @layout, node.ticket.id)}
+                    data-wayfinder-node={node.ticket.id}
+                    class={[
+                      "wayfinder-node",
+                      get_in(node.ticket, [:completion, :completed]) && "wayfinder-node-complete",
+                      node.ticket.id == @selected_ticket_id && "wayfinder-node-selected"
+                    ]}
+                    style={"left: #{node.x}px; top: #{node.y}px"}
+                  >
+                    <span class="wayfinder-node-topline">
+                      <span class="mono"><%= node.ticket.identifier %></span>
+                      <span class="wayfinder-type"><%= node.ticket.wayfinder_type %></span>
+                    </span>
+                    <strong><%= node.ticket.title %></strong>
+                    <span class="wayfinder-node-state"><%= node.ticket.state.name %></span>
+                  </.link>
+                </div>
+              </div>
+            <% else %>
+              <div class="wayfinder-rails">
+                <div class="rails-heading">
+                  <p class="eyebrow">Alternate view</p>
+                  <h3>Dependency rails</h3>
+                </div>
+                <.link
+                  :for={ticket <- @rail_tickets}
+                  patch={wayfinder_path(@selected_project.id, @selected_map.id, @layout, ticket.id)}
+                  data-wayfinder-rail={ticket.id}
+                  class={[
+                    "wayfinder-rail",
+                    get_in(ticket, [:completion, :completed]) && "wayfinder-rail-complete",
+                    ticket.id == @selected_ticket_id && "wayfinder-rail-selected"
+                  ]}
+                >
+                  <span class="rail-marker"></span>
+                  <span class="mono"><%= ticket.identifier %></span>
+                  <strong><%= ticket.title %></strong>
+                  <span><%= ticket.state.name %></span>
+                </.link>
+              </div>
+            <% end %>
+
+            <section :if={@repair_count > 0} class="relation-repair" aria-labelledby="relation-repair-title">
+              <div>
+                <p class="eyebrow">Data quality</p>
+                <h3 id="relation-repair-title">Needs relation repair</h3>
+                <p><%= relationship_repair_label(@repair_count) %>. Cyclic tickets and children without a fetched map stay out of the graph.</p>
+              </div>
+              <div class="repair-ticket-list">
+                <span :for={ticket <- @graph.repair_tickets} class="mono"><%= ticket.identifier %></span>
+              </div>
+            </section>
+
+            <section class="completion-ledger" aria-labelledby="completion-ledger-title">
+              <div class="section-header compact-section-header">
+                <div>
+                  <p class="eyebrow">Durable record</p>
+                  <h3 id="completion-ledger-title" class="section-title">Completed edge tickets</h3>
+                </div>
+                <span class="attention-count numeric"><%= length(@completed_tickets) %> resolved</span>
+              </div>
+
+              <div :if={@completed_tickets == []} class="calm-state compact-calm-state">
+                <strong>No completed edge tickets yet.</strong>
+                <span>Resolution excerpts will appear here when work closes.</span>
+              </div>
+
+              <ol :if={@completed_tickets != []} class="completion-list">
+                <li :for={ticket <- @completed_tickets}>
+                  <.link patch={wayfinder_path(@selected_project.id, @selected_map.id, @layout, ticket.id)}>
+                    <span class="mono"><%= ticket.identifier %></span>
+                    <strong><%= ticket.title %></strong>
+                    <span><%= resolution_excerpt(ticket) %></span>
+                  </.link>
+                </li>
+              </ol>
+            </section>
+          </article>
+
+          <aside class="section-card ticket-inspector" aria-labelledby="ticket-inspector-title">
+            <%= if @selected_ticket do %>
+              <div class="inspector-heading">
+                <p class="eyebrow">Ticket inspector</p>
+                <h2 id="ticket-inspector-title"><%= @selected_ticket.title %></h2>
+                <div class="inspector-badges">
+                  <span class="mono"><%= @selected_ticket.identifier %></span>
+                  <span class="wayfinder-type"><%= @selected_ticket.wayfinder_type %></span>
+                </div>
+              </div>
+
+              <dl class="inspector-facts">
+                <div><dt>Status</dt><dd><%= @selected_ticket.state.name %></dd></div>
+                <div><dt>Updated</dt><dd class="mono"><%= @selected_ticket.updated_at || "Unavailable" %></dd></div>
+              </dl>
+
+              <section class="inspector-section">
+                <h3>Resolution</h3>
+                <p><%= resolution_excerpt(@selected_ticket) %></p>
+              </section>
+
+              <section :if={@external_relations != []} class="inspector-section">
+                <h3>External blockers</h3>
+                <ul class="external-relation-list">
+                  <li :for={relation <- @external_relations}>
+                    <span><%= relation.direction %></span>
+                    <strong class="mono"><%= relation.issue.identifier %></strong>
+                    <small><%= relation.issue.title || "Title unavailable" %></small>
+                  </li>
+                </ul>
+              </section>
+
+              <section class="inspector-section">
+                <h3>Linked artifacts</h3>
+                <ul :if={@selected_ticket.artifacts != []} class="artifact-list">
+                  <li :for={artifact <- @selected_ticket.artifacts}>
+                    <a :if={external_issue_url(artifact.url)} href={artifact.url} target="_blank" rel="noopener noreferrer"><%= artifact.title %></a>
+                  </li>
+                </ul>
+                <p :if={@selected_ticket.artifacts == []} class="muted-copy">No linked Linear documents.</p>
+              </section>
+
+              <a :if={external_issue_url(@selected_ticket.url)} class="inspector-linear-link" href={@selected_ticket.url} target="_blank" rel="noopener noreferrer">
+                Open in Linear ↗
+              </a>
+            <% else %>
+              <div class="inspector-empty">
+                <p class="eyebrow">Ticket inspector</p>
+                <h2 id="ticket-inspector-title">Choose a ticket</h2>
+                <p>Select a graph node or rail to inspect its resolution, artifacts, and external blockers.</p>
+              </div>
+            <% end %>
+          </aside>
+        </section>
+      <% else %>
+        <section class="section-card wayfinder-unavailable" role="status">
+          <p class="eyebrow"><%= wayfinder_status_label(@snapshot.status) %></p>
+          <h2><%= wayfinder_empty_title(@snapshot.status) %></h2>
+          <p><%= wayfinder_empty_copy(@snapshot.status) %></p>
+        </section>
+      <% end %>
     </section>
     """
   end
@@ -537,6 +881,159 @@ defmodule SymphonyElixirWeb.DashboardLive do
     """
   end
 
+  defp assign_navigation(socket, params) do
+    payload = socket.assigns.payload
+
+    if params["view"] == "wayfinder" and match?(%{projects: _projects}, payload) do
+      project = selected_wayfinder_project(payload.projects, params["project"])
+      snapshot = wayfinder_for(project)
+      map_id = selected_wayfinder_map_id(snapshot, params["map"])
+      ticket_id = selected_wayfinder_ticket_id(snapshot, map_id, params["ticket"])
+
+      socket
+      |> assign(:view, "wayfinder")
+      |> assign(:selected_project_id, project && project.id)
+      |> assign(:selected_map_id, map_id)
+      |> assign(:wayfinder_layout, if(params["layout"] == "rails", do: "rails", else: "graph"))
+      |> assign(:selected_ticket_id, ticket_id)
+    else
+      socket
+      |> assign(:view, "operations")
+      |> assign(:selected_project_id, selected_project_id(payload, params))
+      |> assign(:selected_map_id, nil)
+      |> assign(:wayfinder_layout, "graph")
+      |> assign(:selected_ticket_id, nil)
+    end
+  end
+
+  defp selected_wayfinder_project(projects, requested_id) do
+    Enum.find(projects, &(&1.id == requested_id and wayfinder_for(&1).status == "available")) ||
+      Enum.find(projects, &(wayfinder_for(&1).status == "available")) ||
+      Enum.find(projects, &Map.has_key?(&1.state, :wayfinder))
+  end
+
+  defp selected_wayfinder_map_id(snapshot, requested_id) do
+    case Enum.find(snapshot.maps, &(&1.id == requested_id)) do
+      nil -> first_map_id(snapshot)
+      selected_map -> selected_map.id
+    end
+  end
+
+  defp selected_wayfinder_ticket_id(snapshot, map_id, requested_id) do
+    snapshot
+    |> tickets_for_map(map_id)
+    |> Enum.find_value(fn ticket -> if ticket.id == requested_id, do: ticket.id end)
+  end
+
+  defp wayfinder_for(nil), do: empty_wayfinder("unavailable")
+
+  defp wayfinder_for(project) do
+    defaults = empty_wayfinder("unavailable")
+
+    case project.state[:wayfinder] do
+      %{} = snapshot -> Map.merge(defaults, snapshot)
+      _ -> defaults
+    end
+  end
+
+  defp empty_wayfinder(status) do
+    %{
+      status: status,
+      generated_at: "Not yet available",
+      orphaned_count: 0,
+      maps: [],
+      tickets: [],
+      dependencies: []
+    }
+  end
+
+  defp first_map_id(snapshot) do
+    case Enum.find(snapshot.maps, &active_wayfinder_map?/1) || List.first(snapshot.maps) do
+      nil -> nil
+      map -> map.id
+    end
+  end
+
+  defp wayfinder_map_entries(projects, activity) do
+    projects
+    |> Enum.flat_map(fn project ->
+      snapshot = wayfinder_for(project)
+
+      if snapshot.status == "available" do
+        Enum.map(snapshot.maps, &%{project: project, map: &1})
+      else
+        []
+      end
+    end)
+    |> Enum.filter(fn entry ->
+      case activity do
+        :active -> active_wayfinder_map?(entry.map)
+        :inactive -> not active_wayfinder_map?(entry.map)
+      end
+    end)
+    |> Enum.sort_by(&{&1.project.name, &1.map.identifier || "", &1.map.id})
+  end
+
+  defp active_wayfinder_map?(map) do
+    not get_in(map, [:completion, :completed]) and get_in(map, [:state, :type]) not in ["completed", "canceled"]
+  end
+
+  defp tickets_for_map(_snapshot, nil), do: []
+
+  defp tickets_for_map(snapshot, map_id) do
+    snapshot.tickets
+    |> Enum.filter(&(&1.map_id == map_id))
+    |> Enum.sort_by(&{&1.identifier || "", &1.id})
+  end
+
+  defp wayfinder_path(project_id, map_id, layout, ticket_id \\ nil) do
+    [view: "wayfinder", project: project_id, map: map_id, layout: layout, ticket: ticket_id]
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> URI.encode_query()
+    |> then(&"/?#{&1}")
+  end
+
+  defp wayfinder_status_label("available"), do: "Available"
+  defp wayfinder_status_label("loading"), do: "Loading"
+  defp wayfinder_status_label("unsupported"), do: "Linear only"
+  defp wayfinder_status_label(_status), do: "Unavailable"
+
+  defp wayfinder_empty_title("loading"), do: "Building the first Wayfinder snapshot"
+  defp wayfinder_empty_title("unsupported"), do: "Wayfinder is unavailable for this tracker"
+  defp wayfinder_empty_title("available"), do: "No map selected"
+  defp wayfinder_empty_title(_status), do: "Wayfinder data unavailable"
+
+  defp wayfinder_empty_copy("loading"), do: "This workflow will appear after its initial Linear refresh."
+
+  defp wayfinder_empty_copy("unsupported"),
+    do: "Version one reads Linear map and ticket relationships; this workflow uses another tracker."
+
+  defp wayfinder_empty_copy("available"), do: "Add a wayfinder:map issue in Linear to begin mapping this workflow."
+  defp wayfinder_empty_copy(_status), do: "This project has no current Wayfinder snapshot. Other projects remain usable."
+
+  defp relationship_repair_label(1), do: "1 relationship needs repair"
+  defp relationship_repair_label(count), do: "#{count} relationships need repair"
+
+  defp resolution_excerpt(%{resolution: %{excerpt: excerpt}}) when is_binary(excerpt) and excerpt != "",
+    do: excerpt
+
+  defp resolution_excerpt(_ticket), do: "Resolution not recorded."
+
+  defp external_relations(_dependencies, nil), do: []
+
+  defp external_relations(dependencies, ticket) do
+    dependencies
+    |> Enum.filter(&Map.get(&1, :external, false))
+    |> Enum.flat_map(fn dependency ->
+      cond do
+        dependency.to.id == ticket.id -> [%{direction: "Blocked by", issue: dependency.from}]
+        dependency.from.id == ticket.id -> [%{direction: "Blocks", issue: dependency.to}]
+        true -> []
+      end
+    end)
+    |> Enum.sort_by(&{&1.direction, &1.issue.identifier || ""})
+  end
+
   defp selected_project_id(%{projects: projects}, %{"project" => project_id})
        when is_binary(project_id) do
     if Enum.any?(projects, &(&1.id == project_id)), do: project_id
@@ -600,8 +1097,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
     projects
     |> Enum.flat_map(&project_attention_entries(&1, now))
     |> Enum.sort_by(fn item ->
-      {attention_priority(item.kind), attention_sort_time(item), item.project_name,
-       item.entry.issue_identifier}
+      {attention_priority(item.kind), attention_sort_time(item), item.project_name, item.entry.issue_identifier}
     end)
   end
 
@@ -632,12 +1128,17 @@ defmodule SymphonyElixirWeb.DashboardLive do
     normalized = entry.state |> to_string() |> String.downcase()
 
     cond do
-      String.contains?(normalized, "review") -> attention_entry(project, :review, entry)
+      String.contains?(normalized, "review") ->
+        attention_entry(project, :review, entry)
+
       String.contains?(normalized, "merging") or String.contains?(normalized, "merge") ->
         attention_entry(project, :merge, entry)
 
-      state_age_seconds(entry, now) >= 86_400 -> attention_entry(project, :aging, entry)
-      true -> nil
+      state_age_seconds(entry, now) >= 86_400 ->
+        attention_entry(project, :aging, entry)
+
+      true ->
+        nil
     end
   end
 
