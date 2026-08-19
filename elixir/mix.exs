@@ -19,6 +19,8 @@ defmodule SymphonyElixir.MixProject do
           SymphonyElixir.GitLab.Client,
           SymphonyElixir.Jira.Client,
           SymphonyElixir.Linear.Client,
+          SymphonyElixir.Linear.Wayfinder,
+          SymphonyElixir.WayfinderSnapshot,
           SymphonyElixir.SpecsCheck,
           SymphonyElixir.Orchestrator,
           SymphonyElixir.Orchestrator.State,

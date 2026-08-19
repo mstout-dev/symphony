@@ -441,6 +441,7 @@ pre,
 
 .portfolio-dashboard {
   grid-template-areas:
+    "switch"
     "hero"
     "attention"
     "metrics"
@@ -448,6 +449,7 @@ pre,
     "focus";
 }
 
+.portfolio-dashboard > .portfolio-switch { grid-area: switch; }
 .portfolio-hero { grid-area: hero; }
 .portfolio-metrics { grid-area: metrics; }
 .attention-card { grid-area: attention; }
@@ -640,6 +642,542 @@ pre,
   border: 0;
 }
 
+.portfolio-switch {
+  display: inline-flex;
+  width: fit-content;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: var(--shadow-sm);
+}
+
+.portfolio-switch a {
+  min-width: 7.4rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.portfolio-switch a:hover,
+.portfolio-switch .portfolio-switch-active {
+  background: var(--ink);
+  color: white;
+}
+
+.wayfinder-dashboard {
+  --map-ink: #17212b;
+  --map-line: #90a19c;
+  --map-grid: rgba(32, 33, 35, 0.055);
+}
+
+.wayfinder-hero {
+  overflow: hidden;
+  color: #f6fffc;
+  border-color: #27343e;
+  background:
+    radial-gradient(circle at 82% 15%, rgba(77, 214, 173, 0.2), transparent 27%),
+    linear-gradient(135deg, #18222c 0%, #24323a 62%, #193c34 100%);
+}
+
+.wayfinder-hero .eyebrow,
+.wayfinder-hero .hero-copy,
+.wayfinder-hero .last-updated {
+  color: rgba(236, 255, 249, 0.7);
+}
+
+.wayfinder-project-strip {
+  display: flex;
+  gap: 0.55rem;
+  padding: 0.15rem 0.05rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.wayfinder-project-chip {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 0.05rem;
+  min-width: 9.5rem;
+  padding: 0.62rem 0.78rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+.wayfinder-project-chip span {
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.wayfinder-project-chip small {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.wayfinder-project-chip-active {
+  border-color: rgba(16, 163, 127, 0.5);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.08);
+}
+
+.wayfinder-source-unavailable { color: var(--danger) !important; }
+.wayfinder-source-available { color: var(--accent-ink) !important; }
+
+.map-library {
+  padding-bottom: 1rem;
+}
+
+.map-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.7rem;
+  margin-top: 1rem;
+}
+
+.map-card {
+  display: grid;
+  gap: 0.45rem;
+  min-height: 8.2rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 17px;
+  background:
+    linear-gradient(var(--card), var(--card)),
+    repeating-linear-gradient(0deg, transparent 0 23px, var(--map-grid) 24px),
+    repeating-linear-gradient(90deg, transparent 0 23px, var(--map-grid) 24px);
+}
+
+.map-card:hover,
+.map-card-selected {
+  color: var(--ink);
+  border-color: rgba(16, 163, 127, 0.45);
+  box-shadow: 0 12px 28px rgba(31, 52, 46, 0.09);
+  transform: translateY(-1px);
+}
+
+.map-card-project {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.map-card strong {
+  align-self: end;
+  font-size: 1.02rem;
+  line-height: 1.25;
+}
+
+.map-card-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.65rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.map-card-muted { opacity: 0.68; }
+
+.inactive-map-drawer {
+  margin-top: 0.9rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.85rem;
+}
+
+.inactive-map-drawer summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.wayfinder-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  gap: 1rem;
+  align-items: start;
+}
+
+.wayfinder-canvas-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wayfinder-map-header {
+  align-items: center;
+  padding-bottom: 1rem;
+}
+
+.layout-switch {
+  display: inline-flex;
+  gap: 0.18rem;
+  padding: 0.2rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--card-muted);
+}
+
+.layout-switch a {
+  padding: 0.42rem 0.7rem;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.layout-switch a:hover,
+.layout-switch .layout-switch-active {
+  background: white;
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+.wayfinder-graph-scroll {
+  min-height: 250px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background-color: #f9faf9;
+  background-image:
+    linear-gradient(var(--map-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--map-grid) 1px, transparent 1px),
+    radial-gradient(circle at 50% -20%, rgba(16, 163, 127, 0.1), transparent 42%);
+  background-size: 24px 24px, 24px 24px, auto;
+}
+
+.wayfinder-graph {
+  position: relative;
+  min-width: 100%;
+}
+
+.wayfinder-graph svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.wayfinder-connector {
+  fill: none;
+  stroke: var(--map-line);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.wayfinder-arrowhead {
+  fill: var(--map-line);
+}
+
+.wayfinder-node {
+  position: absolute;
+  display: grid;
+  width: 220px;
+  height: 88px;
+  gap: 0.18rem;
+  align-content: center;
+  padding: 0.72rem 0.82rem;
+  overflow: hidden;
+  border: 1px solid #c9d1ce;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.97);
+  color: var(--map-ink);
+  box-shadow: 0 7px 18px rgba(24, 34, 44, 0.09);
+}
+
+.wayfinder-node:hover,
+.wayfinder-node-selected {
+  color: var(--map-ink);
+  border-color: var(--accent);
+  box-shadow: 0 9px 24px rgba(16, 163, 127, 0.17);
+  transform: translateY(-1px);
+}
+
+.wayfinder-node-complete {
+  border-color: rgba(16, 163, 127, 0.38);
+  background: linear-gradient(135deg, #f3fffa, white);
+}
+
+.wayfinder-node-complete::after {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.68rem;
+  content: "✓";
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.wayfinder-node-topline {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.wayfinder-node strong {
+  overflow: hidden;
+  font-size: 0.85rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wayfinder-type {
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.08rem 0.35rem;
+  border-radius: 999px;
+  background: var(--page-deep);
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.wayfinder-node-state {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.wayfinder-rails {
+  display: grid;
+  gap: 0;
+  padding: 0.4rem 0;
+}
+
+.rails-heading {
+  margin-bottom: 0.6rem;
+}
+
+.rails-heading h3,
+.relation-repair h3,
+.completion-ledger h3,
+.ticket-inspector h2,
+.inspector-section h3 {
+  margin: 0.2rem 0 0;
+}
+
+.wayfinder-rail {
+  position: relative;
+  display: grid;
+  grid-template-columns: 5rem minmax(10rem, 1fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+  min-height: 3.4rem;
+  margin-left: 0.5rem;
+  padding: 0.55rem 0.7rem 0.55rem 1.45rem;
+  border-left: 2px solid var(--line-strong);
+  color: var(--ink);
+  font-size: 0.82rem;
+}
+
+.wayfinder-rail:hover,
+.wayfinder-rail-selected {
+  color: var(--ink);
+  background: var(--accent-soft);
+}
+
+.rail-marker {
+  position: absolute;
+  left: -0.38rem;
+  width: 0.65rem;
+  height: 0.65rem;
+  border: 2px solid white;
+  border-radius: 999px;
+  background: var(--map-line);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+.wayfinder-rail-complete .rail-marker { background: var(--accent); }
+
+.relation-repair {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #f2d6a2;
+  border-radius: 16px;
+  background: #fffaf0;
+}
+
+.relation-repair p {
+  margin: 0.35rem 0 0;
+  color: #765a26;
+  font-size: 0.82rem;
+}
+
+.repair-ticket-list {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.repair-ticket-list span {
+  padding: 0.2rem 0.45rem;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.75);
+  color: #765a26;
+  font-size: 0.72rem;
+}
+
+.completion-ledger {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.compact-section-header {
+  align-items: center;
+}
+
+.compact-calm-state {
+  padding: 0.75rem 0.85rem;
+  font-size: 0.8rem;
+}
+
+.completion-list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.85rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.completion-list a {
+  display: grid;
+  grid-template-columns: 5rem minmax(10rem, 0.8fr) minmax(14rem, 1.4fr);
+  gap: 0.7rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  font-size: 0.78rem;
+}
+
+.completion-list a > span:last-child {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ticket-inspector {
+  position: sticky;
+  top: 1rem;
+  padding: 1rem;
+}
+
+.inspector-heading h2 {
+  font-size: 1.2rem;
+  line-height: 1.25;
+}
+
+.inspector-badges {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  margin-top: 0.6rem;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.inspector-facts {
+  display: grid;
+  gap: 0.45rem;
+  margin: 1rem 0;
+}
+
+.inspector-facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.7rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.76rem;
+}
+
+.inspector-facts dt { color: var(--muted); }
+.inspector-facts dd { margin: 0; text-align: right; }
+
+.inspector-section {
+  padding: 0.8rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.inspector-section h3 {
+  font-size: 0.8rem;
+}
+
+.inspector-section p,
+.inspector-empty p {
+  margin: 0.45rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.artifact-list,
+.external-relation-list {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.artifact-list a,
+.inspector-linear-link {
+  color: var(--accent-ink);
+  font-size: 0.8rem;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 0.17em;
+}
+
+.external-relation-list li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.05rem 0.45rem;
+  padding: 0.55rem;
+  border-radius: 10px;
+  background: var(--card-muted);
+  font-size: 0.72rem;
+}
+
+.external-relation-list small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+}
+
+.inspector-linear-link {
+  display: inline-flex;
+  margin-top: 0.8rem;
+}
+
+.muted-copy { color: var(--muted); }
+
+.wayfinder-unavailable {
+  display: grid;
+  gap: 0.3rem;
+  min-height: 13rem;
+  align-content: center;
+  text-align: center;
+}
+
+.wayfinder-unavailable h2,
+.wayfinder-unavailable p { margin: 0; }
+.wayfinder-unavailable p:last-child { color: var(--muted); }
+
 @media (max-width: 860px) {
   .app-shell {
     padding: 1rem 0.85rem 2rem;
@@ -712,6 +1250,18 @@ pre,
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
+
+  .wayfinder-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .ticket-inspector {
+    position: static;
+  }
+
+  .wayfinder-map-header {
+    align-items: flex-start;
+  }
 }
 
 @media (max-width: 560px) {
@@ -729,5 +1279,41 @@ pre,
   .focus-nav {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .portfolio-switch {
+    width: 100%;
+  }
+
+  .portfolio-switch a {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .map-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wayfinder-map-header,
+  .relation-repair {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .wayfinder-rail {
+    grid-template-columns: 4.7rem minmax(0, 1fr);
+  }
+
+  .wayfinder-rail > span:last-child {
+    grid-column: 2;
+    color: var(--muted);
+  }
+
+  .completion-list a {
+    grid-template-columns: 4.7rem 1fr;
+  }
+
+  .completion-list a > span:last-child {
+    grid-column: 1 / -1;
   }
 }

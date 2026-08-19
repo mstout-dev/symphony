@@ -46,6 +46,7 @@ defmodule SymphonyElixir.Config.Schema do
     import Ecto.Changeset
 
     @primary_key false
+    @type t :: %__MODULE__{}
 
     embedded_schema do
       field(:kind, :string)
